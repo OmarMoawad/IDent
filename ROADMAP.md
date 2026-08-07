@@ -10,6 +10,30 @@ licensed third-party partners rather than being built from scratch — see
 Each phase assumes the previous phase's foundations are in place. Nothing
 here is a committed timeline — it's a dependency-ordered build sequence.
 
+## Eras (long-horizon framing)
+
+The phases below group into five eras when thinking on a decade-scale
+horizon. This is framing, not a new dependency structure — the phase-by-phase
+gating rules elsewhere in this doc are still what actually decides sequencing.
+Calendar bands are illustrative only, per the "nothing here is a committed
+timeline" rule above.
+
+| Era | Phases | Theme |
+|---|---|---|
+| I — Build the brain | 0 (+ platform/security automation, see OPERATIONS.md) | Executable repo, identity core, security automation — prerequisite infra, no user-facing product yet |
+| II — Build something people pay for | 1 | Communications hub MVP + the paid AI assistant wedge — the first real product and the first revenue |
+| III — Personal infrastructure | 2, 3, 4 | Productivity, native comms, vault/credentials, education, health |
+| IV — Money & the physical world | 5, 6, 7 | Finance aggregation, biometric payment, devices, digital keys, belongings, logistics |
+| V — Telecommunications & closing the loop | 8, 9, 10 | Personal/discovery modules, deviceless access, and — only if everything above is stable and profitable — the telecom track |
+
+**The non-negotiable rule across all five eras:** a later era never starts
+merely because a calendar says enough time has passed. Each era inherits a
+stable, profitable, sufficiently-automated foundation from the era below it —
+see [OPERATIONS.md](OPERATIONS.md) for what "sufficiently automated" means in
+concrete terms (the OPERATE-0…7 checklist) and for the Founder Attention
+Budget that's meant to keep any of this compatible with a demanding day job,
+degree, or anything else competing for the same hours.
+
 **On mission vs. sequencing:** IDent's mission (README.md) has two parts —
 walking out with nothing but yourself (no wallet, no keys, no documents,
 Phases 3–6), and being able to get to what you need even without a phone or
@@ -232,6 +256,80 @@ complete a High-tier action (open a digital key, view a vault document, pay
 with biometric authorization) without the terminal retaining any credential,
 key, or cached data after the session ends.
 
+## Phase 10 — Telecommunications
+
+The longest-horizon, most explicitly optional phase in this roadmap. Everything
+before it (Eras I–IV) has to be stable *and profitable* first — this phase is
+gated on that, not on the calendar. It exists because Phase 2's "voice calling
+across carrier/VoIP/radio channels" and Phase 0's username-not-phone-number
+identity already point this direction; this phase is what it looks like to
+walk that direction all the way, in small reversible steps instead of one
+leap.
+
+**The proposition, stated precisely:** IDent's `@username` becomes a
+communications identity, resolving to whichever underlying channel is live
+(IDent-to-IDent, VoIP, cellular, work line, temporary number) — the
+traditional phone number stays underneath as the interoperability layer the
+rest of the world still needs, the way an IP address still sits underneath a
+domain name. IDent is not trying to replace the phone number; it's trying to
+stop being the thing a person has to remember.
+
+Seven sub-phases, each a materially bigger commitment than the last. Skipping
+ahead is not available as an option, same as everywhere else in this roadmap —
+see SECURITY.md's framing and BOOTSTRAP.md's milestone gates.
+
+- **T0 — Communications identity.** Purely software: `@username` resolves to
+  the right endpoint (app, browser, temporary device, or a plain phone
+  number) using infrastructure this repo already owns from Phase 0/2. No new
+  regulatory surface.
+- **T1 — VoIP provider.** IDent-to-IDent calling, video, voicemail; PSTN
+  bridging only through an existing licensed provider. Still not a carrier of
+  any kind.
+- **T2 — Telecom reseller / eSIM partner.** IDent sells eSIM/data/voice/SMS
+  bundles; a licensed operator physically carries every bit of traffic. This
+  is the first sub-phase involving a real commercial telecom partner and
+  therefore the first one worth revisiting only after Phase 1's monetization
+  wedge has proven users will pay for something from this repo at all (see
+  BOOTSTRAP.md's milestones).
+- **T3 — MVNO.** IDent buys wholesale network capacity; the user's eSIM
+  account is attached to their IDent identity rather than the reverse. This is
+  the first sub-phase that makes "IDent is a telecom provider" literally
+  true, and the first one requiring the local regulator-facing setup below.
+- **T4 — Programmable carrier integration.** Building on standardized operator
+  network APIs (the GSMA Open Gateway / CAMARA family: KYC/SIM-swap signals,
+  device reachability, location, quality-on-demand) for identity-aware
+  connectivity — e.g., requesting better QoS for a live consult, or using
+  network-level signals as an additional fraud/account-takeover check. Ships
+  only where a partner operator actually exposes these APIs.
+- **T5 — Number abstraction.** `@username` becomes the thing people actually
+  give out; the phone number becomes an internal routing detail most users
+  never see, the same relationship a domain name has to an IP address.
+- **T6 — Full MVNO / regional telecom operator.** Subscriber management,
+  eSIM provisioning, billing, IMS integration, roaming agreements,
+  interconnect, numbering, fraud prevention, dedicated customer service —
+  run by telecom professionals IDent has hired by this point, not by AI
+  guidance. This sub-phase marks where "AI-assisted solo build" stops being
+  the operating model, honestly, same as Phase 3–5 already do in BOOTSTRAP.md.
+- **T7 — Facilities-based network (explicit non-goal by default).** Owning
+  spectrum, towers, or core radio infrastructure is not required to be a
+  telecom company in any way that matters for IDent's mission — a
+  software-heavy MVNO gets the `@username`-as-identity outcome without the
+  capital intensity of physical radio infrastructure. Only reconsider this if
+  the economics become exceptionally and specifically attractive; default
+  posture is "never."
+
+**Regulatory reality, stated plainly:** from T3 onward, telecom licensing is a
+real regulator relationship (e.g., Egypt's NTRA requires a licensed Egyptian
+entity for services that require licensing at all), plus carrier interconnect
+and roaming agreements. AI guidance can build the software stack; it cannot
+manufacture spectrum, a license, or an interconnect agreement — those need
+people, an actual company, and money earned from the eras below this one.
+
+**Exit criteria (T3, the first sub-phase that matters most):** a user can hold
+an IDent-branded eSIM whose account is keyed to their IDent identity rather
+than a phone number, on a wholesale-capacity agreement with a licensed
+operator, with T0–T2 already stable in production for existing users.
+
 ---
 
 ## Cross-cutting: AI Assistant
@@ -271,3 +369,11 @@ and can't fund, and what "private" is honestly able to mean.
   on-device access — the server-verified biometric fallback is a real,
   documented downgrade in security posture, offered as an explicit opt-in
   for people with nothing on them, not as a preferred everyday path.
+- **Not** an attempt to become a facilities-based carrier — Phase 10 stops
+  by default at MVNO (wholesale capacity on a licensed partner's network);
+  owning spectrum or radio infrastructure (T7) is an explicit non-goal
+  unless the economics are exceptional, not a natural end state to grow into.
+- **Not** a replacement for phone numbers — Phase 10's `@username` routing
+  sits *above* the phone number the way a domain name sits above an IP
+  address; the number keeps existing underneath for interoperability with a
+  world that still requires it.

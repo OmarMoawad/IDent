@@ -13,9 +13,12 @@ lost, dead, left behind — the same identity should still be reachable from
 an alternative access point, without that access point ever holding onto
 your keys once the session ends.
 
-> **Status: concept / pre-build.** This repo currently holds the product
-> roadmap and system design, not implementation. See the docs below before
-> writing any code against this plan.
+> **Status: Phase 0A in progress.** The roadmap and system design below are
+> joined by an early monorepo scaffold (`apps/api`, `apps/web`,
+> `packages/shared`) — no user-facing product yet, no domain schema, no
+> deployment target. See [IDent_STATE.md](IDent_STATE.md) for exactly what's
+> done vs. pending before assuming anything here is further along than it
+> is, and [DEVELOPMENT.md](DEVELOPMENT.md) to run it locally.
 
 ## Why
 
@@ -41,6 +44,9 @@ that core mission, not instead of it.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design: identity core, API layer, module boundaries, integrations |
 | [SECURITY.md](SECURITY.md) | Threat model, encryption approach, and compliance load per module |
 | [BOOTSTRAP.md](BOOTSTRAP.md) | Whether this is buildable without capital, and the paid-private-assistant monetization model |
+| [OPERATIONS.md](OPERATIONS.md) | The Founder Attention Budget, the OPERATE-0…7 automation checklist, and the `IDent_STATE.md` resumability contract |
+| [IDent_STATE.md](IDent_STATE.md) | Living status file — current phase, what's actually done vs. pending, next tasks. Read this before writing any code. |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | How to run the current scaffold locally |
 
 ## Module map
 
@@ -55,6 +61,7 @@ that core mission, not instead of it.
 - **Life Logistics** — transportation booking, shipment tracking, addresses, location features
 - **Personal & Discovery** — music, gaming profile, news, research profile, browsing data
 - **Deviceless / Alternative Access** — reach your data and high-trust actions (vault, digital keys, biometric payment) from a public terminal or borrowed device when you have no phone or laptop of your own, without leaving anything behind on that device
+- **Telecommunications** *(longest-horizon, explicitly gated — see ROADMAP.md Phase 10)* — `@username` as a communications identity that resolves to whatever channel is live, starting from IDent-to-IDent VoIP and, only much later and only if earlier phases are stable and profitable, progressing through eSIM reseller and MVNO stages
 - **AI Assistant Layer** — cross-cutting assistant with scoped access to the above
 
 Full sequencing and rationale for this ordering is in [ROADMAP.md](ROADMAP.md).

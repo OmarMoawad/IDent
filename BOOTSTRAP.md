@@ -46,18 +46,58 @@ worth paying for is the thing layered on top: **an assistant that can
 actually answer questions about your own life**, with a privacy commitment
 strong enough to be worth trusting with that data in the first place.
 
-Proposed structure:
+### Pricing tiers
 
-- **Free:** unified inbox, notifications, contacts, calendar, reminders —
-  the aggregation layer, no assistant access
-- **Paid (small recurring fee, e.g. ~£1/month):** the personal AI assistant,
-  read-only over the user's own inbox/calendar/contacts (Phase 1 scope),
-  under the privacy model in [SECURITY.md](SECURITY.md#ai-assistant-privacy)
+Earlier drafts of this doc proposed a flat ~£1/month for the assistant. That
+number is dropped as a fixed commitment — nobody can honestly price 2030+
+infrastructure economics today — but the *intent* behind it (near-zero cost
+for an individual user) is kept, and made structurally safe against the
+failure mode a flat low price invites: a user whose actual usage costs more
+than they pay, subsidized silently until it isn't sustainable. Four tiers
+instead of one price:
+
+- **IDent Foundation** — a small one-time activation fee (illustrative range:
+  $1–5 once). Grants the long-term IDent identity itself. Not recurring —
+  the identity isn't something you rent.
+- **IDent Basic** — free or near-free. Covers Phase 1's aggregation layer
+  (inbox, notifications, contacts, calendar, reminders) — features whose
+  marginal cost per user is genuinely negligible.
+- **IDent Maintenance** — a small recurring fee, sized to actual operating
+  cost rather than picked in advance (illustrative range: $0.50–2/month
+  today; the number is expected to move as infrastructure costs move). Funds
+  the personal AI assistant under the privacy model in
+  [SECURITY.md](SECURITY.md#ai-assistant-privacy).
+- **Metered services** — anything with real, variable marginal cost (heavy
+  AI inference, large cloud storage, SMS, international calling, telecom
+  data, financial operations) is charged near actual incremental cost plus a
+  small margin, not subsidized by the flat tiers above. This is what keeps a
+  $1/month member from being able to generate $20/month of AI/telecom/storage
+  cost and quietly making every other user's subscription unprofitable — see
+  [OPERATIONS.md](OPERATIONS.md)'s OPERATE-7 for how this gets monitored
+  rather than discovered after the fact.
+
+**The governing principle, written down so it doesn't drift:** core
+membership should target the lowest price compatible with long-term
+security, reliability, regulatory compliance, and solvency — not the lowest
+price achievable by quietly under-pricing metered cost. "Cheap for the
+individual" and "commercially sound as a company" are meant to be
+compatible, not in tension, once consumption-heavy services are priced to
+cover themselves separately from membership.
 
 This only works if the privacy commitment is real and specific, not a
 marketing line — see SECURITY.md for exactly what "private" can and can't
 mean given how LLM inference actually works, so the pitch to users doesn't
 overpromise the way "100% free unlimited storage" would have in Phase 2.
+
+### Revenue diversification (later eras, not Phase 1)
+
+Once Phase 1 is proven, the consumer side of IDent can stay priced near cost
+while revenue comes increasingly from elsewhere: enterprise identity APIs,
+verified-credential transactions, telecom wholesale margin (Phase 10),
+network APIs, business communications, premium AI consumption, institutional
+integrations, and enterprise security/compliance tooling. None of this is a
+Phase 1 plan — it's the reason a near-free consumer tier doesn't have to mean
+a company that can't sustain itself, once later eras exist at all.
 
 ## Growth without a marketing budget
 
