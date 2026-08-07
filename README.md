@@ -37,7 +37,7 @@ gaming profile).
 - **Documents & Credentials Vault** — government ID, passport, driving license, enrollment letter, transcript, CV, LinkedIn
 - **Educational Profile** — full education history from day zero (every school/program attended) plus a living record of skills acquired over time
 - **Health Profile** — blood tests and records structured for clinician access
-- **Finance** — bank accounts, investments/stocks
+- **Finance** — bank accounts, investments/stocks, biometric payment authorization (pay in-store/online with a fingerprint or face match instead of a card or PIN)
 - **Devices & Physical World** — remote device piloting, device location, QR/Bluetooth/AirDrop sharing
 - **Life Logistics** — transportation booking, shipment tracking, addresses, location features
 - **Personal & Discovery** — music, gaming profile, news, research profile, browsing data

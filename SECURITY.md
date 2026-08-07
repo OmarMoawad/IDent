@@ -79,6 +79,40 @@ doesn't eliminate the fact that shared data is, by definition, shared.
   ARCHITECTURE.md exists specifically to keep this from being a general
   backdoor — enrollment must be an explicit, auditable, revocable act.
 
+## Biometric payments (Phase 5b) — specific risks
+
+Biometric payment carries two risk classes beyond generic biometric storage
+(already addressed above by never centralizing raw biometric data):
+
+- **Spoofing:** a fingerprint or face is not a secret the way a PIN is — it
+  can be photographed, lifted, or 3D-printed. Liveness/anti-spoof detection
+  on every match is a hard requirement, not a nice-to-have, and should be
+  re-evaluated against known bypass techniques on a regular cadence, not
+  built once and left alone.
+- **Irreversibility:** if a biometric authorization mechanism is defeated,
+  the user cannot rotate their fingerprint the way they'd rotate a card
+  number. This is why Phase 5b authorizes a *revocable token*, not a
+  standing credential — compromising one merchant transaction's token does
+  not compromise the underlying account, and tokens can be revoked/reissued
+  without touching the biometric enrollment itself.
+- **Mandatory fallback:** regulators and accessibility standards both
+  expect a non-biometric path (PIN/password) for anyone who cannot use
+  biometric auth reliably — injury, certain disabilities, device damage.
+  Treat this as a launch blocker for Phase 5b, not a post-launch add-on.
+
+## Compliance load — biometric-specific regulation
+
+Beyond the PCI-DSS load already inherited from Phase 5a's payment rails,
+biometric data triggers its own regulatory category in most jurisdictions —
+e.g., BIPA in Illinois, GDPR's "special category data" classification (EU),
+and similar biometric-specific statutes elsewhere. These typically require
+explicit informed consent for biometric processing, a defined retention/
+deletion policy, and in some jurisdictions a private right of action if
+violated. IDent's device-local-only biometric model (no centralized
+biometric storage, ever) substantially reduces this exposure but does not
+eliminate the consent/disclosure obligations — legal review is required
+before Phase 3 enrollment ships, not just before Phase 5b.
+
 ## Incident response principle
 
 Because each trust tier has its own key domain, a credible response to "your

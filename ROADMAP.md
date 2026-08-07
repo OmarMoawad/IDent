@@ -97,13 +97,42 @@ built in-house; it is integrated through licensed financial data aggregators
 (the same category of partner Plaid/TrueLayer/Belvo occupy) so IDent never
 holds raw banking credentials itself.
 
+### Phase 5a — Accounts (read-only)
+
 - Bank account aggregation (read-only balances/transactions via aggregator)
 - Investment/stocks profile (read-only via brokerage APIs where available)
 - Explicit non-goal: IDent does not custody funds or execute trades in this
-  phase
+  sub-phase
 
 **Exit criteria:** net worth / accounts view is accurate and read-only, with
 zero raw credentials stored by IDent.
+
+### Phase 5b — Biometric payment authorization
+
+Ships only after Phase 5a is stable and only for users who completed
+biometric enrollment in Phase 3. Depends on both.
+
+- Pay in-store or online using a fingerprint or face match instead of
+  presenting a card or entering a PIN
+- Mechanism: the on-device biometric match (same device-local template from
+  Phase 3, never transmitted) authorizes release of a **tokenized payment
+  credential** — a card-network or bank-rail token, provisioned through the
+  existing licensed aggregator/card-network tokenization service from
+  Phase 5a. The biometric replaces the "swipe/PIN" step; it does not become
+  a new payment rail, and it never travels to the merchant or to IDent's
+  servers
+- Liveness/anti-spoof check required on every match (rejects photos, masks,
+  recordings) — see SECURITY.md
+- A non-biometric fallback (PIN or password) is mandatory, not optional —
+  for accessibility, device damage, and injury edge cases
+- Explicit non-goal: IDent does not become a card issuer or payment
+  processor; it authorizes existing payment instruments, it doesn't create
+  new ones
+
+**Exit criteria:** a transaction can be completed end-to-end with a biometric
+match, a working non-biometric fallback exists and is tested, and an audit
+log shows the merchant/processor received a token — never raw biometric
+data.
 
 ## Phase 6 — Physical World & Devices
 

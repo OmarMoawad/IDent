@@ -79,6 +79,37 @@ Profile, Health Profile, Finance, and biometric enrollment data.
   for on-device unlock; raw biometric captures are never uploaded to the
   vault or transmitted off-device
 
+## Biometric payment authorization (Phase 5b)
+
+Reuses the Phase 3 biometric enrollment — there is no second, payment-specific
+biometric database.
+
+```
+On-device biometric match (local template, Phase 3)
+        |  (match = yes/no + liveness check, nothing biometric leaves device)
+        v
+Local secure element releases a payment token
+ (network/aggregator-issued, scoped to one transaction or a short window)
+        |
+        v
+Card network / bank rail (via Phase 5a's licensed aggregator/tokenization
+ service) processes the transaction as it would any tokenized tap-to-pay
+```
+
+Key points:
+- The biometric match happens on the user's own device (secure enclave /
+  equivalent), the same as unlocking the vault in Phase 3 — it is an
+  authorization gate, not a payment mechanism in itself
+- What reaches the merchant or processor is a **token**, structurally
+  identical to what Apple Pay/Google Pay already send — never a biometric
+  template, never raw fingerprint/face data
+- IDent's servers see "transaction authorized" events for the user's own
+  audit log, not biometric data and not full card/account numbers
+- A merchant-side biometric terminal (e.g., a hand/face scanner at a
+  register) is a separate trust boundary from a user's own device and is
+  out of scope until Phase 5b's device-local model is proven — see
+  SECURITY.md
+
 ## Device piloting & location (Phase 6)
 
 A lightweight **device agent** runs on each enrolled device (not the primary
