@@ -78,6 +78,34 @@ doesn't eliminate the fact that shared data is, by definition, shared.
   standpoint. The fixed-action-set, per-device-enrollment design in
   ARCHITECTURE.md exists specifically to keep this from being a general
   backdoor — enrollment must be an explicit, auditable, revocable act.
+- **Digital keys (Phase 6):** a lost or stolen phone becomes a physical
+  break-in risk if key revocation isn't instant and doesn't require the
+  physical lock itself to cooperate. Revocation must work purely from
+  another logged-in device (see ARCHITECTURE.md) — a design that depends on
+  reaching the lock to revoke access is a design that fails exactly when a
+  user most needs it to work.
+
+## Belongings tracking (Phase 6) — the stalking risk
+
+A crowd-sourced find-network for physical items (ARCHITECTURE.md) is
+straightforward to build unsafely: a Bluetooth tag with a static,
+unencrypted identifier is functionally a tracking beacon anyone nearby can
+follow, not just its owner. This is not a hypothetical — this exact failure
+mode is why Apple and Google jointly published an industry unwanted-tracker
+detection standard after AirTags were used for stalking. Non-negotiable
+requirements before this module ships:
+- Tag identifiers rotate on a short interval, so a static ID can't be logged
+  and followed over time by anyone but the owner
+- Relaying devices (any nearby IDent user's phone) never learn what they
+  relayed or whose tag it was — only the owner's own account can decrypt a
+  sighting
+- **Unwanted-tracker detection:** a phone that has been traveling near an
+  unfamiliar tag that isn't the phone owner's should be alerted, mirroring
+  the industry standard above — this protects people who don't use IDent at
+  all from being tracked by someone who does
+- The exit criteria for this module includes the anti-stalking design, not
+  just "tag can be located" — a version without it should not ship, full
+  stop
 
 ## Biometric payments (Phase 5b) — specific risks
 

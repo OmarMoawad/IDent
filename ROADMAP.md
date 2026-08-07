@@ -10,6 +10,16 @@ licensed third-party partners rather than being built from scratch — see
 Each phase assumes the previous phase's foundations are in place. Nothing
 here is a committed timeline — it's a dependency-ordered build sequence.
 
+**On mission vs. sequencing:** IDent's mission (README.md) is "walk out the
+door with nothing but yourself" — no wallet, no keys, no documents. The three
+capabilities that actually deliver that (Documents & Credentials Vault,
+biometric payment, digital keys) don't ship together, because the trust-tier
+ordering below is a safety constraint, not a mission-priority ordering. A
+user gets meaningful pieces of the mission earlier (e.g., ID sharing in
+Phase 3) well before the full "nothing but yourself" experience is complete
+at the end of Phase 6. That gap is intentional — see SECURITY.md for why
+skipping ahead on any of these three isn't actually available as an option.
+
 ---
 
 ## Phase 0 — Identity Core & Platform Foundation
@@ -139,15 +149,29 @@ data.
 
 ## Phase 6 — Physical World & Devices
 
+This is where the "no keys" and "no lost belongings" pieces of the mission
+ship. Depends on Phase 0's device-agent pattern and, for digital keys, on
+Phase 3's biometric/vault infrastructure for the credential itself.
+
 - Device location (find-my-device across the user's own devices)
 - Remote device piloting — scoped, per-device, revocable permissions granted
   via a lightweight device agent (not a general remote-access backdoor)
+- **Digital keys:** home, car, office, and hotel door unlock from the phone,
+  using existing NFC/BLE/UWB digital-key standards (the same category Apple
+  Wallet car keys and hotel key cards already use) rather than a proprietary
+  lock protocol — IDent authorizes the unlock, it doesn't reinvent the lock
+- **Belongings tracking:** locate a bag, a set of physical keys, or any
+  item carrying a low-power Bluetooth tag — not just IDent-connected
+  devices. See SECURITY.md for the privacy design this specifically
+  requires (a crowd-sourced find network is easy to build in a way that
+  enables stalking if done carelessly)
 - Local sharing: QR code, Bluetooth, AirDrop-equivalent data transfer
 - AI assistant gains device-control actions, always with explicit per-action
   confirmation for anything irreversible
 
 **Exit criteria:** a user can locate and take a pre-approved remote action on
-a second device from IDent on their primary device.
+a second device, unlock an enrolled door with their phone, and locate a
+tagged physical item — all from IDent on their primary device.
 
 ## Phase 7 — Life Logistics
 
@@ -196,3 +220,9 @@ and can't fund, and what "private" is honestly able to mean.
   institutions, it doesn't become one.
 - **Not** a general remote-access tool for arbitrary devices — Phase 6's
   device piloting only works on devices the user has explicitly enrolled.
+- **Not** a proprietary lock/key protocol — Phase 6's digital keys ride on
+  existing NFC/BLE/UWB digital-key standards; IDent is the authorization
+  layer, not a lock manufacturer.
+- **Not** an open crowd-sourced tracking network by default — Phase 6's
+  belongings tracking only reports locations to the item's own owner,
+  under the privacy model in SECURITY.md, not to anyone in range.

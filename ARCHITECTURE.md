@@ -121,6 +121,36 @@ IDent app — a separate, minimal-permission companion). It:
 - requires the action to be explicitly enrolled and approved per device
   ahead of time; there is no "pilot any device" mode
 
+## Digital keys (Phase 6)
+
+A digital key is a credential, not a new lock protocol. IDent provisions and
+stores the credential (in the Phase 3 vault's key hierarchy, so door keys
+sit in the same trust tier as the documents vault), then hands it off to the
+phone's existing secure hardware to actually perform the NFC/BLE/UWB unlock
+handshake with the lock — the same mechanism Apple Wallet car keys and
+CCC Digital Key-compliant locks already use. IDent never implements its own
+lock firmware or protocol; it authorizes, stores, and lets the user revoke a
+door credential the way it already does for documents.
+
+- Revocation is immediate and lock-side: losing a phone means revoking the
+  key from any other logged-in device, not rekeying the physical lock
+- Each enrolled lock is its own credential — losing access to one door
+  (lost phone, revoked key) doesn't cascade to others, same isolation
+  principle as the rest of the vault
+
+## Belongings tracking (Phase 6)
+
+A low-power Bluetooth tag (user-owned hardware, not IDent-manufactured)
+broadcasts an identifier; nearby IDent-running devices — belonging to
+*anyone*, not just the tag's owner — relay an encrypted, anonymized sighting
+back to the owner. This is the same crowd-sourced model Apple's Find My
+network uses, and it inherits the same privacy requirement: a relaying
+device must not be able to identify what it relayed or who owns it, and the
+tag's identifier must rotate frequently enough that it can't be used to
+track the *tag* by anyone other than its owner. See SECURITY.md — this
+module is easy to build unsafely (a static ID broadcasting nonstop is a
+stalking tool) and must not ship without the rotating-identifier design.
+
 ## Personal storage as remote storage (Phase 2)
 
 This is a sync/backup node the user runs on hardware they already own
