@@ -10,15 +10,18 @@ licensed third-party partners rather than being built from scratch — see
 Each phase assumes the previous phase's foundations are in place. Nothing
 here is a committed timeline — it's a dependency-ordered build sequence.
 
-**On mission vs. sequencing:** IDent's mission (README.md) is "walk out the
-door with nothing but yourself" — no wallet, no keys, no documents. The three
-capabilities that actually deliver that (Documents & Credentials Vault,
-biometric payment, digital keys) don't ship together, because the trust-tier
-ordering below is a safety constraint, not a mission-priority ordering. A
-user gets meaningful pieces of the mission earlier (e.g., ID sharing in
-Phase 3) well before the full "nothing but yourself" experience is complete
-at the end of Phase 6. That gap is intentional — see SECURITY.md for why
-skipping ahead on any of these three isn't actually available as an option.
+**On mission vs. sequencing:** IDent's mission (README.md) has two parts —
+walking out with nothing but yourself (no wallet, no keys, no documents,
+Phases 3–6), and being able to get to what you need even without a phone or
+laptop on you at all (Phase 9). Neither ships early, because both require
+the trust-tier foundations underneath them to already be proven: you can't
+safely offer alternative access to a vault that doesn't exist yet, and you
+can't safely offer it without the on-device auth model (Phase 0/3) to
+compare it against. A user gets meaningful pieces of the mission long before
+it's complete — ID sharing in Phase 3, a phoneless unlock in Phase 6, a true
+zero-device fallback only in Phase 9. That gap is intentional — see
+SECURITY.md for why skipping ahead on any of it isn't actually available as
+an option.
 
 ---
 
@@ -191,6 +194,44 @@ Lowest-stakes phase, ships whenever convenient — nothing else depends on it.
 - Research profile (papers/topics followed, reading list)
 - Browsing data (opt-in history/bookmark aggregation, local by default)
 
+## Phase 9 — Deviceless / Alternative Access
+
+Answers a different question than Phases 0–8: not "what does IDent do," but
+"what happens when you have no phone, no laptop, nothing with you at all,
+and still need to get in." Ships last, deliberately — it's the highest-risk
+surface in the entire system (public/borrowed terminals are inherently
+hostile environments), and it only makes sense to build once the personal-
+device trust model from every earlier phase has been running and proven.
+This is not meant to make people give up their devices day-to-day — it's
+resilience for the moment they don't have one on them.
+
+Two tiers, matched to the trust-tier model already used everywhere else:
+
+- **Low/Medium tier, any public terminal:** username + password/passphrase
+  only, no biometric, no hardware. Enough to read your inbox or calendar
+  from a library computer or a borrowed phone. Nothing from this session is
+  ever cached on the terminal — see ARCHITECTURE.md.
+- **High/Critical tier (vault, digital keys, biometric payment), the
+  recommended path:** password/passphrase **plus a small portable hardware
+  token** — pocket/keychain-sized, not a phone or laptop, closer to a
+  physical door key than a device. This preserves the existing on-device
+  local-matching security model (see SECURITY.md) instead of weakening it,
+  while still meaning the user isn't carrying a phone or laptop.
+- **High/Critical tier, true zero-device fallback (opt-in, explicitly
+  higher-risk):** password/passphrase plus a server-side verified biometric
+  match, using biometric template-protection techniques (cancelable/secure-
+  sketch templates, never raw or reversible data) rather than the on-device
+  templates used everywhere else in the system. This is a materially
+  different security posture than the rest of IDent and is documented as
+  such in SECURITY.md — it exists for people who genuinely have nothing on
+  them, not as the default recommended path.
+
+**Exit criteria:** a user with zero personal devices can read Low/Medium
+data from any public terminal, and — carrying only a keychain-sized token —
+complete a High-tier action (open a digital key, view a vault document, pay
+with biometric authorization) without the terminal retaining any credential,
+key, or cached data after the session ends.
+
 ---
 
 ## Cross-cutting: AI Assistant
@@ -226,3 +267,7 @@ and can't fund, and what "private" is honestly able to mean.
 - **Not** an open crowd-sourced tracking network by default — Phase 6's
   belongings tracking only reports locations to the item's own owner,
   under the privacy model in SECURITY.md, not to anyone in range.
+- **Not** a claim that zero-device access (Phase 9) is equally secure to
+  on-device access — the server-verified biometric fallback is a real,
+  documented downgrade in security posture, offered as an explicit opt-in
+  for people with nothing on them, not as a preferred everyday path.

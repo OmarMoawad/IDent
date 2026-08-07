@@ -28,6 +28,12 @@ optimistically blurred later.
   government-ID data, and payment-processor vetting that gets stricter
   exactly where the data gets sensitive. These are regulatory costs, not
   engineering costs — no amount of AI-assisted development removes them.
+- Phase 9 (Deviceless access): hardware token supply/logistics if IDent
+  wants a recommended token rather than "bring your own FIDO2 key," and
+  separate legal review specifically for the server-side biometric fallback
+  — its consent, retention, and disclosure requirements are distinct from
+  Phase 3's on-device enrollment (see SECURITY.md). This phase is correctly
+  last precisely because it's neither cheap nor safe to rush.
 - A privacy policy and terms of service that actually hold up — worth a
   fixed-fee lawyer review even at tiny scale, given what Phase 1 already
   touches (inbox contents, contacts) before Phase 3+ is ever built.

@@ -1,13 +1,17 @@
 # IDent
 
-**Walk out the door with nothing but yourself.**
+**Walk out the door with nothing but yourself — and if "yourself" is all you
+have, you can still get in.**
 
 IDent's mission: let a person walk, travel, and commute without carrying a
 wallet, a set of keys, or a folder of documents. Your identity — documents,
 door/car keys, payment, and the whereabouts of what you're carrying — lives
 under one self-chosen username and password, not tied to a phone number, and
 travels with you on a device (and eventually a biometric) instead of in your
-pockets.
+pockets. And for the moments a phone or laptop isn't an option either —
+lost, dead, left behind — the same identity should still be reachable from
+an alternative access point, without that access point ever holding onto
+your keys once the session ends.
 
 > **Status: concept / pre-build.** This repo currently holds the product
 > roadmap and system design, not implementation. See the docs below before
@@ -50,6 +54,7 @@ that core mission, not instead of it.
 - **Devices & Physical World** — remote device piloting, device location, digital keys (home/car/office door unlock from your phone instead of a physical key), belongings tracking (find a bag or item, not just a device), QR/Bluetooth/AirDrop sharing
 - **Life Logistics** — transportation booking, shipment tracking, addresses, location features
 - **Personal & Discovery** — music, gaming profile, news, research profile, browsing data
+- **Deviceless / Alternative Access** — reach your data and high-trust actions (vault, digital keys, biometric payment) from a public terminal or borrowed device when you have no phone or laptop of your own, without leaving anything behind on that device
 - **AI Assistant Layer** — cross-cutting assistant with scoped access to the above
 
 Full sequencing and rationale for this ordering is in [ROADMAP.md](ROADMAP.md).

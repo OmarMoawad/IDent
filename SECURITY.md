@@ -141,6 +141,51 @@ biometric storage, ever) substantially reduces this exposure but does not
 eliminate the consent/disclosure obligations — legal review is required
 before Phase 3 enrollment ships, not just before Phase 5b.
 
+## Deviceless access (Phase 9) — a real, documented downgrade for one path
+
+Everything above this point assumes a biometric template lives only on a
+device the user controls. Phase 9's zero-device fallback breaks that
+assumption on purpose, for people who genuinely have no phone, laptop, or
+token on them — and it needs to be named as a different security posture,
+not folded into the rest of the model as if it carries the same guarantees.
+
+**What changes:** to verify identity with nothing but "something you know"
+(a password) and "something you are" (a biometric) — no device, no token —
+the biometric match has to happen somewhere other than hardware the user
+physically holds. That means a server-side comparison, which means a
+server-side template, full stop. There's no way to offer true zero-device
+biometric access without this trade — anyone who claims otherwise for a
+zero-device product is not describing the actual mechanism.
+
+**How the exposure is bounded, not eliminated:**
+- The server-side template uses biometric template-protection techniques
+  (cancelable biometrics / secure sketch / fuzzy vault schemes) — the stored
+  artifact is not the raw biometric and is not reversible to it, but it is
+  categorically closer to centralized biometric storage than anything else
+  in this system, and should be described to users that way
+- This path is opt-in and separately consented from the base biometric
+  enrollment in Phase 3 — a user who enrolls a fingerprint for on-device
+  unlock has not thereby agreed to a server-side copy existing anywhere
+- It sits in its own isolated key domain (ARCHITECTURE.md) so that if this
+  specific path is ever compromised, it does not unlock the on-device model
+  used by every other phase
+- It defaults to Low/Medium tier data; reaching High/Critical tier through
+  this path specifically (vault, keys, payment) should require an
+  additional factor beyond password + biometric — e.g., a recovery code
+  set up in advance — precisely because this is the weakest link in the
+  whole system and the one most attractive to attack
+
+**Kiosk/public-terminal threats specific to this phase:** shoulder-surfing
+a password at a public terminal, hardware skimmers on a compromised kiosk,
+and malware on a genuinely "borrowed" (not IDent-certified) device are all
+live threats that don't exist in the personal-device model. The no-
+persistence design in ARCHITECTURE.md (nothing written to the terminal,
+session dies on logout/timeout) mitigates lingering exposure but does not
+protect against a terminal that was already compromised before the session
+started — that risk is inherent to using untrusted hardware and should be
+disclosed to users as exactly that, not designed around as if it can be
+fully engineered away.
+
 ## AI Assistant Privacy
 
 The paid assistant tier (BOOTSTRAP.md) is only worth charging for if its

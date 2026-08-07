@@ -151,6 +151,55 @@ track the *tag* by anyone other than its owner. See SECURITY.md — this
 module is easy to build unsafely (a static ID broadcasting nonstop is a
 stalking tool) and must not ship without the rotating-identifier design.
 
+## Deviceless / alternative access (Phase 9)
+
+Everything described so far assumes the user has an enrolled device with a
+secure enclave holding their keys and biometric template. This section
+covers what happens when that assumption doesn't hold — no phone, no
+laptop, nothing enrolled at hand.
+
+```
+Public terminal / borrowed device (untrusted — nothing persists here)
+        |
+   Access broker  <-- new component, exists only for this flow
+        |
+        +--> Low/Medium tier: password/passphrase only
+        |         -> ordinary domain services (inbox, calendar, etc.)
+        |
+        +--> High/Critical tier, recommended: password/passphrase
+        |    + portable hardware token (FIDO2-class, keychain-sized)
+        |         -> token performs local key/biometric matching itself,
+        |            same guarantee as an enrolled phone, just smaller
+        |
+        +--> High/Critical tier, zero-device fallback (opt-in):
+                 password/passphrase + server-verified protected
+                 biometric template
+                 -> Identity Core's degraded-trust path, isolated
+                    key domain, see SECURITY.md
+```
+
+Design rules that make this safe to add rather than a regression on
+everything above it:
+
+- **The access broker is stateless per session.** No key, token, or
+  credential is ever written to the terminal's local storage; the session
+  exists only in the broker's memory for its duration and is destroyed on
+  logout, timeout, or (ideally) tab close
+- **The portable hardware token is the default recommendation for
+  High/Critical tier**, specifically because it preserves the existing
+  on-device local-matching model (ARCHITECTURE.md's guiding constraint at
+  the top of this doc) instead of weakening it — it's a smaller "device,"
+  not a different trust model
+- **The server-verified biometric fallback is architecturally isolated**
+  from the rest of Identity Core's key hierarchy — it has its own key
+  domain, so a compromise of this (newer, higher-risk) path cannot unlock
+  data protected by the on-device model, and vice versa
+- **Kiosk/partner terminals, if IDent operates or certifies any, are a
+  distinct trust boundary from a "any borrowed phone" flow** — a certified
+  terminal can be held to tamper-evidence and no-logging requirements a
+  random borrowed phone can't, and the UI should make clear to the user
+  which kind of terminal they're on before they authenticate
+
 ## Personal storage as remote storage (Phase 2)
 
 This is a sync/backup node the user runs on hardware they already own
