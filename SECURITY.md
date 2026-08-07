@@ -113,6 +113,42 @@ biometric storage, ever) substantially reduces this exposure but does not
 eliminate the consent/disclosure obligations — legal review is required
 before Phase 3 enrollment ships, not just before Phase 5b.
 
+## AI Assistant Privacy
+
+The paid assistant tier (BOOTSTRAP.md) is only worth charging for if its
+privacy claim is precise rather than a slogan. "100% private" needs the same
+scrutiny already applied to "100% full E2E encryption" above.
+
+**What can be genuinely guaranteed:**
+- Conversation history encrypted at rest, under the same per-user key domain
+  as the rest of a user's Medium-tier data — IDent's own database storage
+  cannot be read in bulk
+- No use of user conversations to train shared or future models — this
+  needs to be a contractual term with whatever inference provider is used,
+  not an assumption, since many consumer AI products reserve training
+  rights by default
+- Strict per-user context isolation — one user's assistant never has access
+  to another user's data, and there is no cross-user aggregation without
+  separate, explicit, opt-in consent
+- User-controlled deletion/export of assistant history at any time
+
+**What can't honestly be claimed at Phase 1:** if the assistant calls a
+third-party inference API (the realistic Phase 1 approach — running a
+competitive model on your own infrastructure is not zero-capital), that
+provider necessarily processes each query transiently to generate a
+response. "Never touches another system" is not true of that architecture;
+"processed transiently under a no-retention, no-training agreement, never
+stored beyond serving the response" is the accurate claim, and it's the one
+that should appear in front of users — not "100%" unqualified.
+
+**The actually-100%-private option** is running an open-weight model fully
+on-device or on hardware the user controls, so no query ever leaves their
+own device. That's a real, stronger tier — but it trades off response
+quality/latency against today's best hosted models, and it's meaningfully
+more expensive to build well. Treat it as a possible future "local mode"
+option once there's revenue to justify it, not a Phase 1 baseline promise —
+promising it early and not delivering it is worse than not promising it.
+
 ## Incident response principle
 
 Because each trust tier has its own key domain, a credible response to "your

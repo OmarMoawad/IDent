@@ -32,11 +32,14 @@ The first user-facing product. Deliberately narrow: prove the "unify, don't
 replace" model before adding anything sensitive.
 
 - Unified inbox: messages + notifications pulled from connected sources
-- Contact cards (unified contact record, not yet calling)
-- Calendar + reminders
-- Basic AI assistant: read-only Q&A over the user's own inbox/calendar/contacts
+  (**free**)
+- Contact cards (unified contact record, not yet calling) (**free**)
+- Calendar + reminders (**free**)
+- Basic AI assistant: read-only Q&A over the user's own inbox/calendar/
+  contacts (**paid** — the monetization wedge, see BOOTSTRAP.md)
 
-**Exit criteria:** daily-driver usable as a notification/inbox aggregator.
+**Exit criteria:** daily-driver usable as a notification/inbox aggregator,
+with a working, honestly-described private-assistant upsell.
 
 ## Phase 2 — Productivity & Real-Time Comms
 
@@ -177,6 +180,13 @@ it's allowed to touch:
 | 2 | Write actions with per-action confirmation |
 | 3–5 | Read access to vault/health/finance only with explicit, scoped, revocable grants — never blanket access |
 | 6 | Device-control actions, confirmation required for anything irreversible |
+
+**This is also the paid feature.** The Phase 1 assistant, gated behind a
+recurring per-user fee with an explicit privacy commitment (never used to
+train shared models, encrypted history, isolated per-user context — see
+SECURITY.md), is the monetization wedge for the whole bootstrap plan. See
+[BOOTSTRAP.md](BOOTSTRAP.md) for the full reasoning, what a small fee can
+and can't fund, and what "private" is honestly able to mean.
 
 ## Explicit non-goals
 

@@ -28,6 +28,7 @@ gaming profile).
 | [ROADMAP.md](ROADMAP.md) | Phased delivery plan across all modules, in build order |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design: identity core, API layer, module boundaries, integrations |
 | [SECURITY.md](SECURITY.md) | Threat model, encryption approach, and compliance load per module |
+| [BOOTSTRAP.md](BOOTSTRAP.md) | Whether this is buildable without capital, and the paid-private-assistant monetization model |
 
 ## Module map
 
