@@ -5,7 +5,9 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-08 (session 2).
+Last updated: 2026-08-08 (session 3 — architecture-hardening pass: AMK key
+hierarchy, immutable identity_id, modular-monolith note, AI/vault grant
+mechanism, terminal wording, no-real-data gate, future-gaps log).
 
 ## Current phase
 
@@ -121,6 +123,43 @@ here. Re-check `npm audit` when drizzle-kit cuts a new release.
 - The new migration file (`apps/api/src/db/migrations/0000_large_emma_frost.sql`)
   and `apps/api/vitest.config.ts` are untracked as of this update — not yet
   committed/pushed. See "Next tasks" below.
+
+## Hard gate: no real account data before ops infra exists
+
+Staging/prod hosting, monitoring, backups, and IaC not blocking Phase 0B
+*coding* (per the roadmap's gating rule above) is not the same as them not
+blocking real users. Hard gate: **no real account gets created, and no
+real user data is stored, in any environment beyond local dev, until
+deployment, secrets management, monitoring, and backup/restore-testing
+exist for that environment.** Local dev with synthetic data is unaffected
+by this gate.
+
+## Known future architecture gaps (not blocking, revisit at the relevant phase)
+
+Logged so a future session doesn't have to rediscover these; none of them
+block Phase 0B and none should be designed now:
+
+- **Telecom identity/routing plane** (Phase 10) — ARCHITECTURE.md's
+  Integration Adapters only lists carrier APIs as a generic example.
+  Needs its own section (`identity_id` → `@username` → communications
+  endpoints → policy/routing engine → channel adapters, with phone
+  numbers/eSIM IDs/SIP addresses as replaceable endpoint attributes) once
+  Phase 10 actually starts.
+- **Entitlement/billing separation** (Phase 5+) — BOOTSTRAP.md has pricing
+  tiers but no canonical split between identity ownership, subscription
+  entitlement, and usage billing. Needed before Phase 5's metered services
+  ship, so a lapsed Maintenance payment can't delete an identity and a
+  telecom suspension can't cut off Vault access.
+- **AI capability/permission object model** (Phase 1+, grows with write
+  actions) — "scoped access" and "per-action confirmation" are stated as
+  principles (ROADMAP.md's AI Assistant table) but not as a reusable
+  primitive. Worth formalizing as the assistant's action surface grows
+  past Phase 2's write actions, so AI permissions are ordinary short-lived
+  delegated capabilities rather than special-cased per module.
+- **Append-only audit/event architecture** — audit logging is referenced
+  per-module (vault shares, biometric payment authorizations) but has no
+  first-class, tamper-evident, cross-module design yet. Worth doing once
+  enough modules exist to need a shared retention/query story.
 
 ## Next tasks, in order
 

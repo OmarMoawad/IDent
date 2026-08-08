@@ -41,10 +41,21 @@ key material or biometric matching, which stays on-device.
 - Passkey/WebAuthn as the recommended default; password remains a fallback
 - Issues short-lived session tokens; every domain service validates tokens
   against Identity Core, never trusts a token blindly
-- Owns the **key hierarchy**: one root key derived from the user's
-  password/passkey, which unwraps per-module keys — not a single master key
-  that decrypts everything at once (this is what makes step-up auth for
-  Phase 3–5 modules meaningful, see SECURITY.md)
+- Owns the **key hierarchy**: a randomly generated, client-side **Account
+  Master Key (AMK)**, not derived from the password or passkey. The AMK is
+  wrapped by separate key-encryption keys (KEKs) — one per authorized
+  factor (password-derived, passkey-derived where the authenticator
+  exposes a stable secret, device-bound) — so any one factor unwraps the
+  same AMK, and rotating a leaked factor means rewrapping, not
+  re-deriving everything. A deliberately designed recovery path (its own
+  wrapped copy, its own factor) covers the lost-device-and-password case
+  rather than assuming one of the above always survives. Per-module keys
+  unwrap from the AMK, not a single master key that decrypts everything at
+  once (this is what makes step-up auth for Phase 3–5 modules meaningful,
+  see SECURITY.md). This is deliberately not "derive a root key from the
+  password/passkey" — that doesn't hold for passkeys in general (a WebAuthn
+  ceremony doesn't hand back a reproducible secret by default) and couples
+  every module's keys to one factor never being rotated.
 
 ### Domain services
 
@@ -54,6 +65,15 @@ logistics, personal/discovery). Each:
 - only accepts tokens scoped to its own module
 - talks to Integration Adapters for anything external, never calls a
   third-party API directly
+
+**Current phase note:** through Phase 0–2, this is a **modular monolith**
+— one Fastify API, one Postgres instance, module boundaries enforced as
+separate schemas/packages with no cross-schema queries, not as separately
+deployed services. "One service per module family" above is the target
+end-state once a specific module's trust/scale needs actually demand
+isolated deployment (Vault-backed modules are the likely first candidate).
+Don't stand up separate services or datastores prematurely just to match
+this diagram literally.
 
 ### Integration adapters
 
@@ -78,6 +98,26 @@ Profile, Health Profile, Finance, and biometric enrollment data.
 - Biometric data specifically: only a device-local match template is used
   for on-device unlock; raw biometric captures are never uploaded to the
   vault or transmitted off-device
+
+**AI assistant access to vault-backed data** (ROADMAP.md's cross-cutting
+AI Assistant table, Phase 3–5: "scoped, revocable grants") follows this
+path, not a standing exception to zero-knowledge storage:
+
+```
+User approves a scoped, time-boxed grant (e.g. "summarize this lab result")
+        |
+Client decrypts only the granted document(s) locally
+        |
+Plaintext sent directly to the inference call for that single request
+ (no-retention, no-training terms per SECURITY.md's AI Assistant Privacy)
+        |
+Response returned to user; no plaintext or grant persists server-side
+ beyond the single request
+```
+
+IDent's servers still never hold vault plaintext or a key capable of
+decrypting it — the grant authorizes a client-side decrypt-and-forward for
+one request, not a server-side read path into the vault.
 
 ## Biometric payment authorization (Phase 5b)
 
@@ -184,7 +224,10 @@ everything above it:
 - **The access broker is stateless per session.** No key, token, or
   credential is ever written to the terminal's local storage; the session
   exists only in the broker's memory for its duration and is destroyed on
-  logout, timeout, or (ideally) tab close
+  logout or timeout. Tab close is not a guaranteed trigger — the browser
+  and OS control that, not IDent — so logout/timeout are the enforced
+  boundary, and High/Critical flows must not be described to users as
+  protected by "closing the tab"
 - **The portable hardware token is the default recommendation for
   High/Critical tier**, specifically because it preserves the existing
   on-device local-matching model (ARCHITECTURE.md's guiding constraint at
@@ -209,6 +252,13 @@ ciphertext regardless of what hardware it runs on.
 
 ## Data model note
 
-Every module's records carry the user's IDent username as the foreign key,
-not a phone number or email — consistent with the identity requirement in
-Phase 0. Phone/email remain optional, revocable recovery contacts only.
+Every account gets an immutable, opaque `identity_id` (UUID/ULID),
+generated once at account creation. All internal records — across every
+module, adapter, and future service — reference `identity_id`, never a
+phone number, email, or username. The public `@username` is a unique,
+mutable, human-readable alias resolved to `identity_id` through Identity
+Core; it must never serve as a database primary/foreign key, a
+cryptographic identity, or (once Phase 10 exists) a telecom subscriber
+identifier. Renaming a username updates one row in Identity Core's alias
+table, nothing downstream. Phone/email remain optional, revocable recovery
+contacts only.
