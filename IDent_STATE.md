@@ -5,14 +5,15 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-08.
+Last updated: 2026-08-08 (session 2).
 
 ## Current phase
 
-**Phase 0A — Repository becomes executable** (ROADMAP.md Era I). In
-progress, not complete. Phase 0B (Identity Core) has not started — do not
-add auth/session/user schema before 0A's checklist below is actually done,
-per the roadmap's own gating rule.
+**Phase 0A — Repository becomes executable** (ROADMAP.md Era I). Core
+checklist (migrations, CI, dependency audit) is now verified end-to-end.
+Remaining 0A gaps are staging/prod-environment items that don't block
+Phase 0B per the roadmap's gating rule (that rule gates on identity/data
+integrity infra, not on hosting). Phase 0B (Identity Core) has not started.
 
 ### 0A checklist status
 
@@ -21,15 +22,16 @@ per the roadmap's own gating rule.
 | Monorepo (npm workspaces: `apps/api`, `apps/web`, `packages/shared`) | Done |
 | Backend skeleton (Fastify + TypeScript) | Done — `/health` only, no domain routes yet |
 | Web client skeleton (Next.js App Router) | Done — placeholder page only |
-| Database wiring (Postgres + Drizzle migrations) | Scaffolded, typechecked; **not yet run against a live DB in this environment** — Docker daemon wasn't running when this was built. Untested past `npm run typecheck`/`build`. |
+| Database wiring (Postgres + Drizzle migrations) | **Verified against a live DB** — `docker compose up -d`, `db:generate`, `db:migrate` all run clean; `/health` returns `db: "ok"`. |
 | Automated tests | Done for what exists — one vitest test on `/health`. Will need to grow with every new route. |
-| CI/CD | Done — `.github/workflows/ci.yml` runs typecheck → test → build with a Postgres service container. **Not yet verified on an actual push to GitHub** — only run locally as three separate `npm run` commands. |
-| Dev/staging/production environments | Not started. Only local dev exists (docker-compose Postgres + `npm run dev:*`). No staging/prod hosting target chosen yet. |
+| CI/CD | **Verified on GitHub** — `gh run list` shows the Phase 0A scaffold push's CI run completed/success on `main`. |
+| Dev/staging/production environments | Not started. Only local dev exists (docker-compose Postgres + `npm run dev:*`). No staging/prod hosting target chosen yet. Not a Phase 0B blocker. |
 | Logging | Partial — Fastify's built-in pino logger is on by default (see the request logs in `npm run test` output). No log aggregation/shipping anywhere. |
 | Monitoring | Not started. |
 | Backups | Not started — no real database with real data yet, so nothing to back up. |
 | Migration system | Done — Drizzle + drizzle-kit wired up; `src/db/schema.ts` has one infra-proving table (`system_health_checks`), not domain schema. |
 | Infrastructure-as-code | Not started — docker-compose.yml covers local dev only, no Terraform/equivalent for staging/prod. |
+| Dependency audit | Done — `npm audit` triaged; see "Dependency audit" section below. |
 
 ## Completed components (verified, not just attempted)
 
@@ -64,38 +66,72 @@ per the roadmap's own gating rule.
   purpose) because `@ident/api` and `@ident/web` import types from
   `@ident/shared`'s compiled `dist/`, not its `src/`.
 
+## Dependency audit (2026-08-08)
+
+Started at 12 vulnerabilities (6 moderate, 5 high, 1 critical). Fixed by
+bumping direct dependencies (not `npm audit fix --force`, to control what
+actually changed):
+
+- `drizzle-orm` 0.36.4 → 0.45.2 (`apps/api/package.json`) — cleared a
+  **high**-severity SQL-injection-via-identifiers advisory. Direct prod
+  dependency, worth fixing now while the schema is trivial to re-verify.
+- `drizzle-kit` 0.28.1 → 0.31.10 (`apps/api/package.json`) — dev tool.
+- `vitest` 2.1.5 → 4.1.10 (`apps/api/package.json`) — cleared a
+  **critical** RCE-via-`--ui` advisory (we don't use `--ui`, but no reason
+  to carry it) plus the `vite`/`vite-node`/`esbuild` chain under it.
+- `next` 15.0.3 → 16.3.0 (`apps/web/package.json`) — cleared **high**
+  `postcss` (XSS/path-traversal in CSS sourcemaps) and **high** `sharp`
+  (libvips CVEs) advisories. Only a placeholder page existed, so this was
+  the cheapest point to take the major bump. Next auto-updated
+  `apps/web/tsconfig.json` (`jsx: preserve` → `react-jsx`, added
+  `.next/dev/types/**/*.ts` to `include`) and `next-env.d.ts` on `next
+  build` — both are expected, mandatory changes for v16, not manual edits.
+- Added `apps/api/vitest.config.ts` (`test.include: ["src/**/*.test.ts"]`)
+  — vitest 4's discovery picked up the gitignored `apps/api/dist/*.test.js`
+  build artifact as a second, duplicate test file whenever `dist/` existed
+  locally (e.g. after running `build` before `test`). Harmless in CI
+  (fresh checkout, no `dist/` yet) but would silently double-count tests
+  locally. Root-caused and fixed rather than just `rm -rf dist`.
+
+Typecheck, full test suite, and `npm run build` (all three workspaces)
+re-verified green after each dependency bump.
+
+**Remaining: 4 moderate**, all the same advisory
+(GHSA-67mh-4wv8-2f99 — esbuild's dev server accepts requests from any
+website) via `drizzle-kit@0.31.10 → @esbuild-kit/esm-loader → esbuild`.
+0.31.10 is drizzle-kit's latest version and still carries this transitive
+dependency — no upstream fix exists yet. `npm audit fix --force`'s
+suggestion is to **downgrade** to `drizzle-kit@0.18.1`, which is not a real
+fix. Accepted as a monitored risk: dev-only tooling, `drizzle-kit generate`
+is a one-shot CLI invocation not a long-running dev server, so the
+"malicious website hits your open dev server" exploit path doesn't apply
+here. Re-check `npm audit` when drizzle-kit cuts a new release.
+
 ## Known failures / open issues
 
-- Database migration path (`npm run db:generate`/`db:migrate` in
-  `apps/api`) is **untested against a live database** — Docker wasn't
-  running when this was built. Next session: `docker compose up -d`, then
-  run both commands, then confirm `/health` reports `db: "ok"`.
-- CI workflow (`.github/workflows/ci.yml`) has never actually run on GitHub
-  — it was written to mirror the three local commands exactly, but a real
-  push/PR run hasn't happened yet.
 - No staging or production hosting target has been chosen. Nothing in this
-  repo assumes one yet (no Dockerfile for the API, no deploy config).
-- `npm install` reported 12 vulnerabilities (6 moderate, 5 high, 1 critical)
-  in transitive dependencies — not triaged yet. Run `npm audit` before
-  Phase 0B ships anything user-facing.
+  repo assumes one yet (no Dockerfile for the API, no deploy config). Not
+  a Phase 0B blocker, but will need deciding before anything ships.
 - Several install scripts (esbuild, sharp, fsevents) were blocked by the
   local npm config's `allowScripts` policy. Build/test/typecheck all still
   passed, so this hasn't caused a problem yet, but it's worth knowing about
   if something platform-specific breaks later (sharp in particular is
   image-processing native code — irrelevant until a module actually needs
   image handling).
+- The new migration file (`apps/api/src/db/migrations/0000_large_emma_frost.sql`)
+  and `apps/api/vitest.config.ts` are untracked as of this update — not yet
+  committed/pushed. See "Next tasks" below.
 
 ## Next tasks, in order
 
-1. Get Docker running locally, then actually run the migration path
-   end-to-end and confirm `/health` reports `db: "ok"`.
-2. Push this branch and confirm `.github/workflows/ci.yml` actually goes
-   green on GitHub, not just locally.
-3. Run `npm audit` and triage the reported vulnerabilities before adding
-   anything user-facing.
-4. Only then: start Phase 0B (Identity Core) — username+password identity,
+1. Review and commit the pending changes (dependency bumps in both
+   `package.json`s, `package-lock.json`, the generated migration file, the
+   new `apps/api/vitest.config.ts`, and the Next-auto-generated
+   `tsconfig.json`/`next-env.d.ts` diffs), then push and re-confirm CI is
+   still green with the new dependency versions.
+2. Only then: start Phase 0B (Identity Core) — username+password identity,
    passkey/WebAuthn, session/key management, per ARCHITECTURE.md's Identity
-   Core section. Do not start this before items 1–3 above are done.
+   Core section.
 
 ## Deployment instructions
 
