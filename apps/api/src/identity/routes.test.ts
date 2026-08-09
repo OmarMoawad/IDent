@@ -198,7 +198,22 @@ describe("GET /identity/amk-wrap", () => {
     await app.close();
   });
 
-  it("404s for a factor with no stored wrap", async () => {
+  it("404s for a password-factor identity that never registered one (defensive: shouldn't be reachable in practice)", async () => {
+    const app = buildApp();
+    const { response: registerResponse } = await registerUser(app);
+    const { sessionToken } = registerResponse.json();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/identity/amk-wrap?factor=something-unrecognized",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("rejects factor=passkey without a credentialId", async () => {
     const app = buildApp();
     const { response: registerResponse } = await registerUser(app);
     const { sessionToken } = registerResponse.json();
@@ -206,6 +221,21 @@ describe("GET /identity/amk-wrap", () => {
     const response = await app.inject({
       method: "GET",
       url: "/identity/amk-wrap?factor=passkey",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("404s for factor=passkey with a credentialId that isn't registered", async () => {
+    const app = buildApp();
+    const { response: registerResponse } = await registerUser(app);
+    const { sessionToken } = registerResponse.json();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/identity/amk-wrap?factor=passkey&credentialId=not-a-real-credential",
       headers: { authorization: `Bearer ${sessionToken}` },
     });
 

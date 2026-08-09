@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { webauthnChallenges, webauthnCredentials } from "../db/schema.js";
+import { passkeyAmkWraps, webauthnChallenges, webauthnCredentials } from "../db/schema.js";
 
 export type NewChallenge = {
   identityId: string;
@@ -59,8 +59,9 @@ export type NewCredential = {
   transports: string | null;
 };
 
-export async function insertCredential(input: NewCredential): Promise<void> {
-  await db.insert(webauthnCredentials).values(input);
+export async function insertCredential(input: NewCredential): Promise<{ id: string }> {
+  const [row] = await db.insert(webauthnCredentials).values(input).returning({ id: webauthnCredentials.id });
+  return row;
 }
 
 export type CredentialSummary = {
@@ -100,4 +101,35 @@ export async function findCredentialByCredentialId(credentialId: string): Promis
 
 export async function updateCredentialCounter(id: string, counter: number): Promise<void> {
   await db.update(webauthnCredentials).set({ counter, lastUsedAt: new Date() }).where(eq(webauthnCredentials.id, id));
+}
+
+export type NewPasskeyAmkWrap = {
+  credentialId: string;
+  identityId: string;
+  wrappedKey: string;
+};
+
+/**
+ * Adds or replaces the wrap for one credential — used when a passkey is
+ * registered for the first time, or when the client re-derives and resends
+ * a fresher wrap for an existing credential (e.g. once the AMK becomes
+ * available in a session that registered the passkey while locked).
+ */
+export async function upsertPasskeyAmkWrap(input: NewPasskeyAmkWrap): Promise<void> {
+  await db
+    .insert(passkeyAmkWraps)
+    .values(input)
+    .onConflictDoUpdate({
+      target: passkeyAmkWraps.credentialId,
+      set: { wrappedKey: input.wrappedKey, updatedAt: new Date() },
+    });
+}
+
+export async function findPasskeyAmkWrap(credentialRowId: string): Promise<string | null> {
+  const rows = await db
+    .select({ wrappedKey: passkeyAmkWraps.wrappedKey })
+    .from(passkeyAmkWraps)
+    .where(eq(passkeyAmkWraps.credentialId, credentialRowId))
+    .limit(1);
+  return rows[0]?.wrappedKey ?? null;
 }

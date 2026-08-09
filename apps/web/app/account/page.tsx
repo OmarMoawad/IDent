@@ -7,6 +7,15 @@ import { useEffect, useState, type FormEvent } from "react";
 import { unwrapAmk } from "../../lib/amk";
 import { ApiError, apiGet, apiPost } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
+import {
+  PRF_AMK_LOCKED_PLACEHOLDER,
+  PRF_UNSUPPORTED_PLACEHOLDER,
+  getPrfOutputForNewCredential,
+  getPrfOutputForUnlock,
+  isPrfEnabledAfterRegistration,
+  unwrapAmkWithPrfOutput,
+  wrapAmkWithPrfOutput,
+} from "../../lib/prf";
 
 export default function AccountPage() {
   const router = useRouter();
@@ -41,21 +50,64 @@ export default function AccountPage() {
         auth?.sessionToken,
       );
       const attestation = await startRegistration({ optionsJSON: options });
-      // The passkey factor's AMK wrap is a placeholder, not real wrapping —
-      // see IDent_STATE.md: real passkey-derived AMK wrapping needs the
-      // WebAuthn PRF extension, deliberately not built yet. Sending a fake
-      // "encrypted" blob here would be more misleading than an honest
-      // placeholder, since this passkey can't unwrap it either way.
+
+      // Real PRF-derived AMK wrapping when the authenticator supports it
+      // and the vault key is actually loaded to wrap; an honest,
+      // distinguishable placeholder otherwise — never fabricated
+      // ciphertext nothing could unwrap later. See lib/prf.ts.
+      let wrappedAmkKey: string = PRF_UNSUPPORTED_PLACEHOLDER;
+      let statusMessage =
+        "Passkey registered — you can use it to log in, but this device can't use it to unlock your vault key (no PRF support). Unlock with your password after a passkey login instead.";
+
+      if (isPrfEnabledAfterRegistration(attestation)) {
+        if (!auth?.amk) {
+          wrappedAmkKey = PRF_AMK_LOCKED_PLACEHOLDER;
+          statusMessage =
+            "Passkey registered — but your vault key was locked, so this passkey can't unlock it yet. Unlock with your password, then register a new passkey to enable passkey unlock.";
+        } else {
+          const prfOutput = await getPrfOutputForNewCredential(attestation.id);
+          if (prfOutput) {
+            wrappedAmkKey = await wrapAmkWithPrfOutput(auth.amk, prfOutput);
+            statusMessage = "Passkey registered — you can use it to log in and unlock your vault key.";
+          } else {
+            statusMessage =
+              "Passkey registered — you can use it to log in, but it didn't produce a vault-key secret this time. Unlock with your password after a passkey login instead.";
+          }
+        }
+      }
+
       await apiPost(
         "/identity/webauthn/register/verify",
-        { response: attestation, wrappedAmkKey: "prf-not-yet-implemented" },
+        { response: attestation, wrappedAmkKey },
         auth?.sessionToken,
       );
-      setPasskeyStatus("Passkey registered — you can use it to log in next time.");
+      setPasskeyStatus(statusMessage);
     } catch (err) {
       setPasskeyStatus(err instanceof ApiError ? err.message : "Passkey registration failed or was cancelled.");
     } finally {
       setPasskeySubmitting(false);
+    }
+  }
+
+  async function handleUnlockWithPasskey() {
+    setUnlockError(null);
+    setUnlocking(true);
+    try {
+      const result = await getPrfOutputForUnlock();
+      if (!result) {
+        setUnlockError("That passkey can't unlock the vault key (no PRF support, or it was registered before this device could produce one).");
+        return;
+      }
+      const wrap = await apiGet<{ wrappedKey: string }>(
+        `/identity/amk-wrap?factor=passkey&credentialId=${encodeURIComponent(result.credentialId)}`,
+        auth?.sessionToken,
+      );
+      const amk = await unwrapAmkWithPrfOutput(wrap.wrappedKey, result.prfOutput);
+      setAuth(auth ? { ...auth, amk } : null);
+    } catch (err) {
+      setUnlockError(err instanceof Error ? err.message : "Could not unlock.");
+    } finally {
+      setUnlocking(false);
     }
   }
 
@@ -117,6 +169,9 @@ export default function AccountPage() {
           {unlockError && <p role="alert">{unlockError}</p>}
           <button type="submit" disabled={unlocking}>
             {unlocking ? "Unlocking…" : "Unlock"}
+          </button>
+          <button type="button" onClick={handleUnlockWithPasskey} disabled={unlocking}>
+            {unlocking ? "Unlocking…" : "Unlock with passkey"}
           </button>
         </form>
       )}

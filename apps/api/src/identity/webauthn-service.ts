@@ -5,6 +5,7 @@ import {
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import type {
+  AuthenticationExtensionsClientInputs,
   AuthenticationResponseJSON,
   AuthenticatorTransportFuture,
   PublicKeyCredentialCreationOptionsJSON,
@@ -12,16 +13,30 @@ import type {
   RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { issueSession, type Session } from "./service.js";
-import { findIdentityByUsername, upsertAmkWrap } from "./store.js";
-import { CHALLENGE_TTL_MS, ORIGIN, RP_ID, RP_NAME } from "./webauthn-config.js";
+import { findIdentityByUsername } from "./store.js";
+import { CHALLENGE_TTL_MS, ORIGIN, RP_ID, RP_NAME, getPrfSaltBase64Url } from "./webauthn-config.js";
 import {
   consumeChallenge,
   findCredentialByCredentialId,
   findCredentialsByIdentity,
+  findPasskeyAmkWrap,
   insertChallenge,
   insertCredential,
   updateCredentialCounter,
+  upsertPasskeyAmkWrap,
 } from "./webauthn-store.js";
+
+/**
+ * @simplewebauthn/server's bundled DOM type shim (AuthenticationExtensions-
+ * ClientInputs) predates the WebAuthn PRF extension — this cast reaches
+ * past that typing gap to the real, browser-supported `prf` extension
+ * fields (https://w3c.github.io/webauthn/#prf-extension), not a custom
+ * extension of our own. See apps/web/lib/prf.ts for the matching client
+ * side.
+ */
+function withPrfExtension(extensions: { prf: { eval?: { first: string } } }): AuthenticationExtensionsClientInputs {
+  return extensions as unknown as AuthenticationExtensionsClientInputs;
+}
 
 export class UnknownUsernameError extends Error {
   constructor() {
@@ -75,6 +90,11 @@ export async function getRegistrationOptions(
       id: credential.credentialId,
       transports: decodeTransports(credential.transports),
     })),
+    // Empty eval: this create() call only asks the browser to report PRF
+    // *support* (clientExtensionResults.prf.enabled). The actual secret
+    // is pulled by a follow-up get() right after — see apps/web/lib/prf.ts
+    // for why create()-time PRF results aren't relied on directly.
+    extensions: withPrfExtension({ prf: {} }),
   });
 
   await insertChallenge({
@@ -88,11 +108,14 @@ export async function getRegistrationOptions(
 }
 
 /**
- * `wrappedAmkKey` is the same opaque-blob-from-the-caller convention as
- * password registration (see IDent_STATE.md) — "passkey" is a distinct
- * factor in the AMK key hierarchy (ARCHITECTURE.md), but nothing generates
- * a real client-side wrap for it yet (that needs the PRF/largeBlob
- * extension, deliberately deferred — see "Next tasks").
+ * `wrappedAmkKey` is an opaque blob from the caller, same convention as
+ * password registration (see IDent_STATE.md) — the server never interprets
+ * it. apps/web now produces a real PRF-derived wrap when the authenticator
+ * supports it; when it doesn't (or the AMK wasn't loaded at registration
+ * time), the client sends an honest placeholder instead of fabricating
+ * ciphertext nothing can unwrap later. Stored per-credential (not per
+ * factor) in passkey_amk_wraps — see that table's comment in schema.ts for
+ * why.
  */
 export async function verifyRegistration(
   identityId: string,
@@ -118,7 +141,7 @@ export async function verifyRegistration(
   }
 
   const { credential } = verification.registrationInfo;
-  await insertCredential({
+  const inserted = await insertCredential({
     identityId,
     credentialId: credential.id,
     publicKey: Buffer.from(credential.publicKey).toString("base64url"),
@@ -126,7 +149,7 @@ export async function verifyRegistration(
     transports: encodeTransports(credential.transports),
   });
 
-  await upsertAmkWrap({ identityId, factor: "passkey", wrappedKey: wrappedAmkKey });
+  await upsertPasskeyAmkWrap({ credentialId: inserted.id, identityId, wrappedKey: wrappedAmkKey });
 }
 
 export async function getAuthenticationOptions(username: string): Promise<PublicKeyCredentialRequestOptionsJSON> {
@@ -134,12 +157,17 @@ export async function getAuthenticationOptions(username: string): Promise<Public
   if (!identity) throw new UnknownUsernameError();
 
   const credentials = await findCredentialsByIdentity(identity.identityId);
+  const prfSalt = await getPrfSaltBase64Url();
   const options = await generateAuthenticationOptions({
     rpID: RP_ID,
     allowCredentials: credentials.map((credential) => ({
       id: credential.credentialId,
       transports: decodeTransports(credential.transports),
     })),
+    // Evaluates PRF in the same get() ceremony as the real login signature
+    // — one user gesture produces both a verified assertion and the secret
+    // apps/web needs to unwrap this credential's AMK wrap, if it has one.
+    extensions: withPrfExtension({ prf: { eval: { first: prfSalt } } }),
   });
 
   await insertChallenge({
@@ -188,4 +216,17 @@ export async function verifyAuthentication(
   await updateCredentialCounter(stored.id, verification.authenticationInfo.newCounter);
 
   return issueSession(identity.identityId, identity.username);
+}
+
+/**
+ * Fetches the AMK wrap for one specific passkey credential — not "the
+ * passkey factor" in general, since each credential has its own wrap (see
+ * passkey_amk_wraps' comment in schema.ts). Ownership is re-checked here
+ * (not just "does this credential exist") so one identity's session can
+ * never read another identity's wrap by guessing/observing a credentialId.
+ */
+export async function getPasskeyAmkWrap(identityId: string, credentialId: string): Promise<string | null> {
+  const stored = await findCredentialByCredentialId(credentialId);
+  if (!stored || stored.identityId !== identityId) return null;
+  return findPasskeyAmkWrap(stored.id);
 }

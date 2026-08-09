@@ -31,6 +31,10 @@ describe("WebAuthn passkey registration", () => {
     });
     expect(optionsResponse.statusCode).toBe(200);
     const options = optionsResponse.json();
+    // Requests PRF capability detection on create() — see webauthn-service's
+    // getRegistrationOptions and apps/web/lib/prf.ts for why this is an
+    // empty eval (the real secret is pulled by a follow-up get()).
+    expect(options.extensions?.prf).toEqual({});
 
     const authenticator = new SoftwareAuthenticator();
     const attestation = authenticator.register(options.challenge);
@@ -43,6 +47,69 @@ describe("WebAuthn passkey registration", () => {
     });
 
     expect(verifyResponse.statusCode).toBe(201);
+    await app.close();
+  });
+
+  it("stores a per-credential AMK wrap fetchable via GET /identity/amk-wrap?factor=passkey", async () => {
+    const app = buildApp();
+    const { sessionToken } = await registerPasswordIdentity(app);
+
+    const optionsResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register/options",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+    const options = optionsResponse.json();
+    const authenticator = new SoftwareAuthenticator();
+    const attestation = authenticator.register(options.challenge);
+
+    const verifyResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register/verify",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: { response: attestation, wrappedAmkKey: "real-prf-derived-ciphertext-blob" },
+    });
+    expect(verifyResponse.statusCode).toBe(201);
+
+    const wrapResponse = await app.inject({
+      method: "GET",
+      url: `/identity/amk-wrap?factor=passkey&credentialId=${encodeURIComponent(attestation.id)}`,
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+    expect(wrapResponse.statusCode).toBe(200);
+    expect(wrapResponse.json()).toEqual({ factor: "passkey", wrappedKey: "real-prf-derived-ciphertext-blob" });
+
+    await app.close();
+  });
+
+  it("won't let one identity read another identity's passkey wrap by credentialId", async () => {
+    const app = buildApp();
+    const { sessionToken: sessionA } = await registerPasswordIdentity(app);
+    const { sessionToken: sessionB } = await registerPasswordIdentity(app);
+
+    const optionsResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register/options",
+      headers: { authorization: `Bearer ${sessionA}` },
+    });
+    const options = optionsResponse.json();
+    const authenticator = new SoftwareAuthenticator();
+    const attestation = authenticator.register(options.challenge);
+
+    await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register/verify",
+      headers: { authorization: `Bearer ${sessionA}` },
+      payload: { response: attestation, wrappedAmkKey: "identity-a-only-blob" },
+    });
+
+    const crossResponse = await app.inject({
+      method: "GET",
+      url: `/identity/amk-wrap?factor=passkey&credentialId=${encodeURIComponent(attestation.id)}`,
+      headers: { authorization: `Bearer ${sessionB}` },
+    });
+    expect(crossResponse.statusCode).toBe(404);
+
     await app.close();
   });
 
@@ -124,6 +191,9 @@ describe("WebAuthn passkey login", () => {
     expect(loginOptionsResponse.statusCode).toBe(200);
     const loginOptions = loginOptionsResponse.json();
     expect(loginOptions.allowCredentials?.length).toBeGreaterThan(0);
+    // Evaluated in this same get() ceremony so login and AMK-unlock cost a
+    // single user gesture — see getAuthenticationOptions and lib/prf.ts.
+    expect(typeof loginOptions.extensions?.prf?.eval?.first).toBe("string");
 
     const assertion = authenticator.authenticate(loginOptions.challenge);
 

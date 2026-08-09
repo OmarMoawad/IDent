@@ -47,7 +47,11 @@ export const passwordCredentials = pgTable("password_credentials", {
  * "Identity Core" key hierarchy). wrappedKey is opaque ciphertext the server
  * never unwraps or interprets — only the client that holds the matching
  * factor secret can unwrap it. One row per (identity, factor) so rotating a
- * leaked factor rewraps that row without touching the others.
+ * leaked factor rewraps that row without touching the others. In practice
+ * this only ever holds the "password" factor: passkeys don't fit the
+ * one-secret-per-factor assumption (each credential has its own PRF
+ * secret), so they live in passkey_amk_wraps instead — see that table's
+ * comment below.
  */
 export const accountMasterKeyWraps = pgTable(
   "account_master_key_wraps",
@@ -108,6 +112,27 @@ export const webauthnCredentials = pgTable(
   },
   (table) => [uniqueIndex("webauthn_credentials_credential_id_idx").on(table.credentialId)],
 );
+
+/**
+ * Passkey-specific AMK wraps — one row per WebAuthn credential, not per
+ * (identity, factor) like account_master_key_wraps. Each passkey's PRF
+ * output is unique to that authenticator, so a wrap made with one
+ * passkey's PRF secret can't be opened by a different passkey belonging
+ * to the same identity; account_master_key_wraps' one-row-per-factor
+ * shape assumes a factor produces one interchangeable secret, which is
+ * true for password but not for multiple independent passkeys.
+ */
+export const passkeyAmkWraps = pgTable("passkey_amk_wraps", {
+  credentialId: uuid("credential_id")
+    .primaryKey()
+    .references(() => webauthnCredentials.id, { onDelete: "cascade" }),
+  identityId: uuid("identity_id")
+    .notNull()
+    .references(() => identities.id, { onDelete: "cascade" }),
+  wrappedKey: text("wrapped_key").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * A pending registration or authentication ceremony's server-generated

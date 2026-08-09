@@ -5,13 +5,34 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-09 (session 7 — Phase 0B slice: session persistence
-across a page reload. The session token now survives a reload via
-sessionStorage (tab-lifetime only); the AMK deliberately does not — a
-reload always comes back "locked," and /account gained an unlock form
-that re-derives the AMK from a freshly-entered password via the existing
-amk-wrap endpoint. Manually verified in a real browser. See "Next tasks"
-below for what's still not built).
+Last updated: 2026-08-10 (session 8 — Phase 0B slice: real passkey-derived
+AMK wrapping via the WebAuthn PRF extension, replacing the
+"prf-not-yet-implemented" placeholder. Registration does a two-step
+create()-then-get() ceremony to pull a PRF secret (create()-time PRF
+results aren't reliable cross-browser); login evaluates PRF in the same
+get() ceremony the server already runs for authentication, so unlocking
+costs no extra gesture. Each passkey's wrap is now stored per-credential
+(new `passkey_amk_wraps` table, migration `0003_easy_redwing.sql`) instead
+of per-factor, because unlike password, different passkeys have different
+PRF secrets and can't share one wrap. `npm run typecheck`, `npm run test`
+(30 passing, up from 26), and `npm run build` all pass across every
+workspace, and the HTTP contract (extensions in options responses,
+`GET /identity/amk-wrap?factor=passkey&credentialId=...`, ownership
+isolation) was verified against the live dev API with curl. **Manually
+click-through-verified in a real browser (Touch ID) by Omar**: register →
+passkey registration produces a real PRF wrap ("you can use it to log in
+and unlock your vault key") → log out → log in with the passkey alone,
+AMK loads with no password re-entry → reload (AMK re-locks, as designed)
+→ "Unlock with passkey" button unlocks it again with no password. One real
+bug was caught and fixed during this verification: the PRF extension's
+`eval.first` must be raw bytes (`BufferSource`) per spec, not a base64url
+string — `@simplewebauthn/browser` doesn't know about the `prf` extension
+so (unlike `challenge`) it never decodes it, and the first attempt passed
+a string, which the browser rejected outright ("Passkey registration
+failed or was cancelled"). Fixed in `apps/web/lib/prf.ts` (client-only
+ceremonies now build `eval.first` as bytes directly) and `login/page.tsx`
+(new `decodePrfEvalExtensions` decodes the server's base64url before the
+real WebAuthn call). See "Next tasks" below for what's still not built).
 
 ## Current phase
 
@@ -26,19 +47,22 @@ multiple active sessions per identity, which is what "log in from two
 devices" in Phase 0's exit criteria requires), have the AMK fetched back
 and unwrapped locally after login, register a passkey on an
 already-logged-in identity, log in with that passkey instead of a
-password, log out, and now stay logged in across a page reload (session
-token only — the AMK re-locks and needs a password re-entry to unlock).
-All of this has a real UI in apps/web (`/register`, `/login`, `/account`)
-— manually clicked through end to end in an actual browser more than
-once, most recently: register → reload (still logged in, AMK locked) →
-unlock with password (AMK loaded) → log out → reload `/account` directly
-(correctly bounced to `/login`, no stale session). Password hashes,
-session tokens, passkey credentials/signatures, and the AMK wrap/unwrap
-round-trip are all real — none of this is stubbed.
+password, log out, stay logged in across a page reload (session token only
+— the AMK re-locks and needs a password or passkey re-entry to unlock),
+and now unwrap the AMK using a passkey's real WebAuthn PRF secret instead
+of a placeholder — both at login (single ceremony) and via a new "Unlock
+with passkey" button on /account. When a passkey can't produce a real PRF
+secret (unsupported authenticator, or the AMK was locked at registration
+time), apps/web stores and surfaces an honest, distinguishable placeholder
+instead of fabricating ciphertext nothing could unwrap later. All of this
+has a real UI in apps/web (`/register`, `/login`, `/account`), fully
+click-through-verified in a real browser this session, including the PRF
+ceremony (see header). Password hashes, session tokens, passkey
+credentials/signatures, and both AMK wrap/unwrap paths (password and
+passkey/PRF) are all real — none of this is stubbed.
 
-Not done: real passkey-derived AMK wrapping (the passkey factor still
-sends an honest placeholder, not a working wrap — see below), step-up auth
-for High/Critical tier modules, and passwordless registration.
+Not done: passwordless registration and step-up auth for High/Critical
+tier modules (see "Next tasks").
 
 ### 0A checklist status
 
@@ -56,8 +80,8 @@ read.
 | Backend skeleton (Fastify + TypeScript) | Done as Phase 0A infra. Since outgrown: `/identity/*` and `/identity/webauthn/*` are real domain routes now — see "Completed components." |
 | Web client skeleton (Next.js App Router) | Done as Phase 0A infra. Since outgrown: `/register`, `/login`, `/account` are real pages now, not a placeholder — see "Completed components." |
 | Database wiring (Postgres + Drizzle migrations) | **Verified against a live DB** — `docker compose up -d`, `db:generate`, `db:migrate` all run clean; `/health` returns `db: "ok"`. |
-| Automated tests | Done as Phase 0A infra (one test, `/health`). Since outgrown: 26 tests across identity/session/WebAuthn — see "Completed components." |
-| CI/CD | **Verified on GitHub, repeatedly** — every push since Phase 0A's scaffold (including all of Phase 0B's slices) has a green `gh run watch` on `main`, most recently the session-persistence commit. |
+| Automated tests | Done as Phase 0A infra (one test, `/health`). Since outgrown: 30 tests across identity/session/WebAuthn — see "Completed components." |
+| CI/CD | **Verified on GitHub, repeatedly** — every push since Phase 0A's scaffold (including all of Phase 0B's slices) has a green `gh run watch` on `main`, most recently the session-persistence commit; this session's PRF work has not yet been pushed (see "Next tasks"). |
 | Dev/staging/production environments | Not started. Only local dev exists (docker-compose Postgres + `npm run dev:*`). No staging/prod hosting target chosen yet. Not a Phase 0B blocker. |
 | Logging | Partial — Fastify's built-in pino logger is on by default (see the request logs in `npm run test` output). No log aggregation/shipping anywhere. |
 | Monitoring | Not started. |
@@ -130,6 +154,46 @@ read.
   `/login`, not a stale session). `npm run typecheck` and `npm run build`
   pass across every workspace; the API's 26 tests are unaffected (no
   backend changes this slice) and still pass.
+- Passkey-derived AMK wrapping (WebAuthn PRF extension): new
+  `passkey_amk_wraps` table (migration `0003_easy_redwing.sql`), one row
+  per WebAuthn credential (not per identity+factor like
+  `account_master_key_wraps`) since each passkey has its own PRF secret.
+  `getRegistrationOptions` now requests `extensions: { prf: {} }` (probe
+  support only); `getAuthenticationOptions` requests
+  `extensions: { prf: { eval: { first: <salt> } } }` so a real login
+  ceremony evaluates PRF in the same user gesture as the signature check.
+  The PRF salt (`webauthn-config.ts`'s `getPrfSaltBase64Url`) is SHA-256 of
+  a fixed public label, independently recomputed by `apps/web/lib/prf.ts`
+  rather than shared as a hardcoded byte array, so the two copies can't
+  drift. New `GET /identity/amk-wrap?factor=passkey&credentialId=...`
+  contract (credentialId required — 400 without it; ownership re-checked
+  via `findCredentialByCredentialId`, so one identity can't read another's
+  wrap by guessing a credentialId — ownership isolation has a dedicated
+  test). `apps/web/lib/prf.ts` derives the AES-GCM key via HKDF-SHA256 from
+  the PRF output (empty HKDF salt — the PRF output is already fresh,
+  high-entropy, per-credential IKM, per RFC 5869 §2.2); registration runs a
+  two-step create()-then-get() ceremony (create()-time PRF results aren't
+  reliable across browsers, per the WebAuthn PRF extension's own guidance)
+  and stores an honest placeholder (`prf-unsupported` or
+  `amk-locked-at-registration`, distinguishable from real ciphertext) when
+  the authenticator can't produce a secret or the AMK wasn't loaded at
+  registration time. `/account` gained an "Unlock with passkey" button
+  alongside the existing password-unlock form; `/login`'s passkey path now
+  unwraps the AMK in the same ceremony as login, instead of always staying
+  locked. 8 new/changed tests (30 total in the API workspace): PRF
+  extension present in both options responses, a full register→fetch-wrap
+  round trip, cross-identity ownership isolation, and the
+  missing-credentialId (400) / unknown-credentialId (404) contract.
+  `npm run typecheck`, `npm run test`, and `npm run build` all pass across
+  every workspace; the new migration was applied clean against a live
+  local Postgres, and the HTTP-level contract (extensions in both options
+  responses, the amk-wrap round trip, the 400/404 cases) was re-verified
+  with curl against the live dev API, not just vitest. **Manually
+  click-through-verified in a real browser (Touch ID) by Omar**: register
+  → real PRF wrap on passkey registration → log out → passkey login alone
+  unlocks the AMK → reload (re-locks) → "Unlock with passkey" unlocks it
+  again. Caught and fixed one real bug along the way — see this file's
+  header for the `eval.first` bytes-vs-base64url-string mismatch.
 
 ## Architecture decisions made in this scaffold
 
@@ -242,16 +306,24 @@ read.
   encryption primitives" line item, not a stub to revisit — what's still
   deferred is *using* the AMK to encrypt real module data (nothing needs
   that yet) and the passkey-factor wrap (next point).
-- **The passkey factor still can't produce a real AMK wrap — the UI is
-  honest about that, not silently broken.** `/account`'s "Register a
-  passkey" button sends the literal placeholder string
-  `"prf-not-yet-implemented"` as `wrappedAmkKey` rather than fabricating
-  ciphertext that looks real but that no passkey can actually unwrap later
-  (the WebAuthn PRF extension this needs is still unbuilt — see "Next
-  tasks"). A passkey registered this way is fully real for *logging in*;
-  it just can't unlock the AMK yet, and the account page's "AMK loaded in
-  memory" / "not available this session" status line reflects that
-  truthfully after either login path.
+- **The passkey factor now produces a real AMK wrap when the authenticator
+  supports the WebAuthn PRF extension and the AMK was loaded at
+  registration time — falling back to an honest, distinguishable
+  placeholder otherwise, never fabricated ciphertext.** `/account`'s
+  "Register a passkey" flow checks `clientExtensionResults.prf.enabled`
+  after `create()`, then runs a local-only `get()` ceremony
+  (`getPrfOutputForNewCredential` in `apps/web/lib/prf.ts`) to pull the
+  actual secret and wrap the AMK with it via HKDF+AES-GCM. If the
+  authenticator lacks PRF support, `wrappedAmkKey` is the placeholder
+  `"prf-unsupported"`; if PRF is supported but the AMK wasn't loaded in
+  memory when the passkey was registered, it's `"amk-locked-at-registration"`
+  — both distinguishable from real ciphertext and both surfaced honestly in
+  the UI's status message, not silently swallowed. A passkey registered
+  under either placeholder is fully real for *logging in*; it just can't
+  unlock the AMK until re-registered with the AMK loaded. See the
+  "Completed components" entry above for the full mechanism (per-credential
+  wraps, the two-ceremony registration pattern, and why). **Not yet
+  browser-click-through-verified** — see this file's header.
 - **The session token persists across a reload via `sessionStorage`; the
   AMK never persists at all, by design.** `sessionStorage` was chosen over
   `localStorage` (indefinite, cross-tab, higher exposure window) and over
@@ -330,13 +402,16 @@ here. Re-check `npm audit` when drizzle-kit cuts a new release.
   if something platform-specific breaks later (sharp in particular is
   image-processing native code — irrelevant until a module actually needs
   image handling).
-- The passkey factor's `wrappedAmkKey` has no real producer yet (see its
-  architecture-decision note above) — every caller that registers a
-  passkey, including apps/web's UI, sends the literal placeholder string
-  `"prf-not-yet-implemented"`. The password factor's wrap is real as of
-  this session. Don't mistake a passing passkey-registration test for
-  evidence that its AMK wrap works end-to-end; it only proves the server
-  correctly stores-and-never-reads whatever it's given.
+- The WebAuthn/PRF ceremony was manually click-through-verified in a real
+  browser this session (see this file's header) — but only on one platform
+  authenticator (Touch ID on Omar's Mac, via whichever browser he tested
+  in). The automated test suite's software authenticator has no PRF/
+  hmac-secret simulation (see `identity/test-support/software-
+  authenticator.ts`), so PRF derivation is only ever exercised by real
+  hardware, never by CI. Untested: security keys, Windows Hello, and
+  browsers/authenticators that don't support PRF at all (the
+  `PRF_UNSUPPORTED_PLACEHOLDER` fallback path is implemented but has not
+  been observed firing against a real non-PRF authenticator).
 - CI logs a deprecation warning (not a failure) that `actions/checkout@v4`
   and `actions/setup-node@v4` target Node 20, which GitHub is forcing onto
   Node 24 runners in the meantime. Bump both actions to their Node
@@ -392,11 +467,6 @@ block Phase 0B and none should be designed now:
   be primary) but needs its own recovery-path thinking first — an identity
   whose only factor is a passkey on a lost device needs a designed way
   back in, not an afterthought.
-- **AMK-wrap-via-passkey (PRF/largeBlob extension)** — see the
-  architecture-decision note above. Revisit once browser/authenticator PRF
-  support is worth re-checking; apps/web's real client-side AMK generation
-  now exists (this session), so this is purely about extending it to a
-  second factor, not building the mechanism from scratch.
 - **WebAuthn login-options username enumeration** — see the
   architecture-decision note above. A narrow, accepted gap specific to
   `/identity/webauthn/login/options`; password login already closed the
@@ -410,26 +480,20 @@ block Phase 0B and none should be designed now:
 
 ## Next tasks, in order
 
-Do not start Phase 1 (or any later phase) before these three are done —
-per an external review of this repo (2026-08-09): the identity/key
-foundation everything else builds on should be solid before more surface
-area sits on top of it, and "solid" specifically means real passkey-based
-AMK unlock, not just passkey login, plus the recovery-path and step-up
-items below. Passkey login authenticating an identity is not the same as
-a complete passwordless encrypted-data-unlock path — see the AMK
-architecture-decision notes above for exactly where that line falls
-today.
+Do not start Phase 1 (or any later phase) before these are done — per an
+external review of this repo (2026-08-09): the identity/key foundation
+everything else builds on should be solid before more surface area sits on
+top of it, and "solid" specifically means real passkey-based AMK unlock,
+not just passkey login, plus the recovery-path and step-up items below.
+(Real passkey-based AMK unlock was completed and click-through-verified in
+session 8 — see this file's header.)
 
-1. AMK-wrap-via-passkey (WebAuthn PRF extension) — replaces the honest
-   `"prf-not-yet-implemented"` placeholder with a real wrap, so passkey
-   login can unlock the AMK the same way password login already does. See
-   the future-gaps entry above for why this was deferred rather than
-   guessed at.
-2. Passwordless registration — see the future-gaps entry above. Now that
-   real passkey UI exists to build against, the remaining blocker is
-   purely the recovery-path design (an identity whose only factor is a
-   passkey on a lost device needs a designed way back in).
-3. Step-up auth / elevated sessions for High/Critical tier modules — see
+1. Passwordless registration — see the future-gaps entry above. Now that
+   real passkey UI (including PRF-based AMK wrapping, as of session 8)
+   exists to build against, the remaining blocker is purely the
+   recovery-path design (an identity whose only factor is a passkey on a
+   lost device needs a designed way back in).
+2. Step-up auth / elevated sessions for High/Critical tier modules — see
    the future-gaps entry above. Not needed until a Phase 3+ module ships a
    write path, but the base-session/elevated-session split is easier to
    add before any module depends on "one session tier" than after.

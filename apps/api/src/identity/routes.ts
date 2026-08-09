@@ -11,10 +11,11 @@ import {
   register,
   validateSession,
 } from "./service.js";
+import { getPasskeyAmkWrap } from "./webauthn-service.js";
 
 type RegisterBody = { username?: unknown; password?: unknown; wrappedAmkKey?: unknown };
 type LoginBody = { username?: unknown; password?: unknown };
-type AmkWrapQuery = { factor?: unknown };
+type AmkWrapQuery = { factor?: unknown; credentialId?: unknown };
 
 export function registerIdentityRoutes(app: FastifyInstance): void {
   app.post<{ Body: RegisterBody }>("/identity/register", async (request, reply) => {
@@ -81,7 +82,21 @@ export function registerIdentityRoutes(app: FastifyInstance): void {
       ? request.query.factor
       : "password";
 
-    const wrappedKey = await getAmkWrap(identity.identityId, factor);
+    let wrappedKey: string | null;
+    if (factor === "passkey") {
+      // Unlike "password", "passkey" isn't a single interchangeable
+      // secret — each credential has its own wrap (see passkey_amk_wraps'
+      // comment in schema.ts), so the caller must say which one it just
+      // authenticated with.
+      const credentialId = typeof request.query.credentialId === "string" ? request.query.credentialId : "";
+      if (!credentialId) {
+        return reply.code(400).send({ error: 'credentialId is required for factor "passkey".' });
+      }
+      wrappedKey = await getPasskeyAmkWrap(identity.identityId, credentialId);
+    } else {
+      wrappedKey = await getAmkWrap(identity.identityId, factor);
+    }
+
     if (!wrappedKey) return reply.code(404).send({ error: `No AMK wrap stored for factor "${factor}".` });
 
     return reply.code(200).send({ factor, wrappedKey });
