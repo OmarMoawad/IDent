@@ -5,13 +5,13 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-09 (session 6 — Phase 0B slice: apps/web stops being
-a placeholder. Register/login/account pages, real client-side AMK
-generation via WebCrypto (PBKDF2 + AES-GCM), passkey registration/login
-wired to @simplewebauthn/browser, a new GET /identity/amk-wrap endpoint,
-and CORS. Manually verified end to end in a real browser — the first time
-any of this identity work has been driven by an actual browser instead of
-tests. See "Next tasks" below for what's still not built).
+Last updated: 2026-08-09 (session 7 — Phase 0B slice: session persistence
+across a page reload. The session token now survives a reload via
+sessionStorage (tab-lifetime only); the AMK deliberately does not — a
+reload always comes back "locked," and /account gained an unlock form
+that re-derives the AMK from a freshly-entered password via the existing
+amk-wrap endpoint. Manually verified in a real browser. See "Next tasks"
+below for what's still not built).
 
 ## Current phase
 
@@ -26,20 +26,19 @@ multiple active sessions per identity, which is what "log in from two
 devices" in Phase 0's exit criteria requires), have the AMK fetched back
 and unwrapped locally after login, register a passkey on an
 already-logged-in identity, log in with that passkey instead of a
-password, and log out. All of this now has a real UI in apps/web
-(`/register`, `/login`, `/account`) — manually clicked through end to end
-in an actual browser: register → account (AMK loaded) → register a passkey
-→ log out → log in with password (AMK loaded again) → log in with passkey
-instead (AMK correctly *not* available this session, since passkey login
-can't unwrap it yet). Password hashes, session tokens, passkey
-credentials/signatures, and the AMK wrap/unwrap round-trip are all real —
-none of this is stubbed.
+password, log out, and now stay logged in across a page reload (session
+token only — the AMK re-locks and needs a password re-entry to unlock).
+All of this has a real UI in apps/web (`/register`, `/login`, `/account`)
+— manually clicked through end to end in an actual browser more than
+once, most recently: register → reload (still logged in, AMK locked) →
+unlock with password (AMK loaded) → log out → reload `/account` directly
+(correctly bounced to `/login`, no stale session). Password hashes,
+session tokens, passkey credentials/signatures, and the AMK wrap/unwrap
+round-trip are all real — none of this is stubbed.
 
 Not done: real passkey-derived AMK wrapping (the passkey factor still
 sends an honest placeholder, not a working wrap — see below), step-up auth
-for High/Critical tier modules, passwordless registration, and any
-persistence of the session across a page reload (auth state is deliberately
-in-memory only right now).
+for High/Critical tier modules, and passwordless registration.
 
 ### 0A checklist status
 
@@ -111,6 +110,18 @@ in-memory only right now).
   `npm run build` all pass across every workspace with this slice in — no
   new dependency-audit findings from `@fastify/cors`,
   `@simplewebauthn/browser`, or the shared-type change.
+- Session persistence: `apps/web/lib/auth-context.tsx` now persists the
+  session token to `sessionStorage` and rehydrates it via `GET
+  /identity/me` on app load; `/account` gained an unlock form (password →
+  `GET /identity/amk-wrap` → `unwrapAmk`) for re-deriving the AMK after a
+  reload, since the AMK itself is never persisted. No backend changes were
+  needed — this reuses the existing `/identity/me` and `/identity/amk-wrap`
+  endpoints. Manually verified in a real browser: register → reload
+  (stays logged in, AMK shows locked) → unlock with password (AMK loads)
+  → log out → reload `/account` directly (correctly redirected to
+  `/login`, not a stale session). `npm run typecheck` and `npm run build`
+  pass across every workspace; the API's 26 tests are unaffected (no
+  backend changes this slice) and still pass.
 
 ## Architecture decisions made in this scaffold
 
@@ -233,14 +244,24 @@ in-memory only right now).
   it just can't unlock the AMK yet, and the account page's "AMK loaded in
   memory" / "not available this session" status line reflects that
   truthfully after either login path.
-- **Auth state (session token + unwrapped AMK) lives in a React context,
-  in memory only — nothing persists across a page reload.** Persisting a
-  session token safely (localStorage is XSS-exposed, cookies need CSRF
-  handling) is a real security design question that Phase 0's placeholder
-  UI doesn't need to answer yet; the AMK specifically should almost
-  certainly *never* go into any persistent browser storage even once that
-  design exists. Logged as a known gap, not an oversight — see "Next
-  tasks."
+- **The session token persists across a reload via `sessionStorage`; the
+  AMK never persists at all, by design.** `sessionStorage` was chosen over
+  `localStorage` (indefinite, cross-tab, higher exposure window) and over
+  cookies (would mean adding CSRF handling and a cookie-based auth path
+  alongside the existing bearer-token one — a bigger architecture change
+  than this slice needs). `sessionStorage` dies with the tab and is never
+  written to disk the way `localStorage` is, which is a meaningfully
+  smaller exposure surface for the same convenience. The AMK is refetched
+  and re-unwrapped on demand instead (see the unlock-flow note below) —
+  this is the same "locked vault, unlock with password" pattern password
+  managers use, not a workaround. On mount, the token is validated against
+  `GET /identity/me` rather than trusted blindly — an expired/revoked
+  token gets cleared, not silently kept around.
+- **`/account`'s unlock flow re-derives the AMK by calling the existing
+  `GET /identity/amk-wrap` + `unwrapAmk` — no new backend endpoint.** Needed
+  after any reload, and also currently the only way to get the AMK loaded
+  after a passkey login (since passkey login can't unwrap it directly —
+  see the passkey-AMK-wrap note above). One mechanism serves both cases.
 - **No frontend automated tests yet** — no Vitest+Testing-Library harness
   exists for apps/web. This slice was verified by a full manual
   browser click-through (register → passkey → logout → password login →
@@ -367,13 +388,12 @@ block Phase 0B and none should be designed now:
   architecture-decision note above. A narrow, accepted gap specific to
   `/identity/webauthn/login/options`; password login already closed the
   equivalent hole.
-- **Session persistence across a page reload** — see the architecture-
-  decision note above. Needs a deliberate security decision (storage
-  mechanism, XSS/CSRF trade-offs, whether the AMK specifically should ever
-  be re-derivable without re-entering the password), not a quick fix.
 - **No frontend automated test harness** — see the architecture-decision
   note above. Worth setting up once apps/web has enough surface that
-  manual click-throughs become the bottleneck.
+  manual click-throughs become the bottleneck. Now three sessions running
+  on manual verification alone (register/login/passkeys, then session
+  persistence) — worth revisiting this trade-off if a fourth frontend
+  slice is about to ship the same way.
 
 ## Next tasks, in order
 
@@ -386,10 +406,7 @@ block Phase 0B and none should be designed now:
    real passkey UI exists to build against, the remaining blocker is
    purely the recovery-path design (an identity whose only factor is a
    passkey on a lost device needs a designed way back in).
-3. Session persistence across a page reload — see the future-gaps entry
-   above. A real security design question (storage mechanism, XSS/CSRF
-   trade-offs), not a quick fix.
-4. Step-up auth / elevated sessions for High/Critical tier modules — see
+3. Step-up auth / elevated sessions for High/Critical tier modules — see
    the future-gaps entry above. Not needed until a Phase 3+ module ships a
    write path, but the base-session/elevated-session split is easier to
    add before any module depends on "one session tier" than after.
@@ -433,8 +450,12 @@ None yet — there is no staging or production target. Local-only: see
   browser memory — it is never written to localStorage, sessionStorage,
   IndexedDB, or any other persistent store, and never leaves the browser
   except as its password-wrapped ciphertext at registration. A page reload
-  loses it, which is intentional (see the future-gaps entry on session
-  persistence) not a bug to route around by weakening this.
+  loses it, which is intentional (see the session-persistence
+  architecture-decision note above) — the account page's unlock flow is
+  the sanctioned way back, not a bug to route around by weakening this.
+  The session *token* is the one thing that does persist (`sessionStorage`
+  only, tab-lifetime, revalidated against `GET /identity/me` on load —
+  see the same note).
 - WebAuthn responses are attacker-controlled JSON off the wire; both verify
   functions wrap the library's verify call in a `.catch` that treats any
   thrown error (malformed base64url, missing fields, decode failures) the

@@ -3,21 +3,32 @@
 import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import { startRegistration } from "@simplewebauthn/browser";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { ApiError, apiPost } from "../../lib/api";
+import { useEffect, useState, type FormEvent } from "react";
+import { unwrapAmk } from "../../lib/amk";
+import { ApiError, apiGet, apiPost } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
 
 export default function AccountPage() {
   const router = useRouter();
-  const { auth, setAuth } = useAuth();
+  const { auth, setAuth, restoring } = useAuth();
   const [passkeyStatus, setPasskeyStatus] = useState<string | null>(null);
   const [passkeySubmitting, setPasskeySubmitting] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [unlockPassword, setUnlockPassword] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!auth) router.replace("/login");
-  }, [auth, router]);
+    if (!restoring && !auth) router.replace("/login");
+  }, [restoring, auth, router]);
 
+  if (restoring) {
+    return (
+      <main>
+        <p>Loading…</p>
+      </main>
+    );
+  }
   if (!auth) return null;
 
   async function handleAddPasskey() {
@@ -61,6 +72,25 @@ export default function AccountPage() {
     }
   }
 
+  async function handleUnlock(event: FormEvent) {
+    event.preventDefault();
+    setUnlockError(null);
+    setUnlocking(true);
+    try {
+      const wrap = await apiGet<{ wrappedKey: string }>("/identity/amk-wrap?factor=password", auth?.sessionToken);
+      const amk = await unwrapAmk(wrap.wrappedKey, unlockPassword);
+      setAuth(auth ? { ...auth, amk } : null);
+      setUnlockPassword("");
+    } catch (err) {
+      // Covers both a wrong password (IncorrectPasswordError) and an API
+      // failure (ApiError, e.g. session expired) with the same handling —
+      // both have a message worth showing as-is.
+      setUnlockError(err instanceof Error ? err.message : "Could not unlock.");
+    } finally {
+      setUnlocking(false);
+    }
+  }
+
   return (
     <main>
       <h1>Account</h1>
@@ -70,8 +100,26 @@ export default function AccountPage() {
         <dt>Identity ID</dt>
         <dd>{auth.identityId}</dd>
         <dt>Account Master Key</dt>
-        <dd>{auth.amk ? "Loaded in memory" : "Not available this session"}</dd>
+        <dd>{auth.amk ? "Loaded in memory" : "Locked — enter your password to unlock"}</dd>
       </dl>
+      {!auth.amk && (
+        <form onSubmit={handleUnlock}>
+          <label>
+            Password
+            <input
+              type="password"
+              value={unlockPassword}
+              onChange={(event) => setUnlockPassword(event.target.value)}
+              required
+              autoComplete="current-password"
+            />
+          </label>
+          {unlockError && <p role="alert">{unlockError}</p>}
+          <button type="submit" disabled={unlocking}>
+            {unlocking ? "Unlocking…" : "Unlock"}
+          </button>
+        </form>
+      )}
       <button type="button" onClick={handleAddPasskey} disabled={passkeySubmitting}>
         {passkeySubmitting ? "Registering passkey…" : "Register a passkey"}
       </button>
