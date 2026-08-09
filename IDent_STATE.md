@@ -42,19 +42,27 @@ for High/Critical tier modules, and passwordless registration.
 
 ### 0A checklist status
 
+This table is a snapshot of Phase 0A's own infra checklist, frozen as of
+session 3 when Phase 0A finished — it does **not** track Phase 0B's
+progress (see "Current phase" above and "Completed components" below for
+that). A few rows below were left describing the Phase 0A-era state after
+Phase 0B had already outgrown them; fixed here since a future session
+skimming just this table would otherwise get a false "nothing built yet"
+read.
+
 | Item | Status |
 |---|---|
 | Monorepo (npm workspaces: `apps/api`, `apps/web`, `packages/shared`) | Done |
-| Backend skeleton (Fastify + TypeScript) | Done — `/health` only, no domain routes yet |
-| Web client skeleton (Next.js App Router) | Done — placeholder page only |
+| Backend skeleton (Fastify + TypeScript) | Done as Phase 0A infra. Since outgrown: `/identity/*` and `/identity/webauthn/*` are real domain routes now — see "Completed components." |
+| Web client skeleton (Next.js App Router) | Done as Phase 0A infra. Since outgrown: `/register`, `/login`, `/account` are real pages now, not a placeholder — see "Completed components." |
 | Database wiring (Postgres + Drizzle migrations) | **Verified against a live DB** — `docker compose up -d`, `db:generate`, `db:migrate` all run clean; `/health` returns `db: "ok"`. |
-| Automated tests | Done for what exists — one vitest test on `/health`. Will need to grow with every new route. |
-| CI/CD | **Verified on GitHub** — `gh run list` shows the Phase 0A scaffold push's CI run completed/success on `main`. |
+| Automated tests | Done as Phase 0A infra (one test, `/health`). Since outgrown: 26 tests across identity/session/WebAuthn — see "Completed components." |
+| CI/CD | **Verified on GitHub, repeatedly** — every push since Phase 0A's scaffold (including all of Phase 0B's slices) has a green `gh run watch` on `main`, most recently the session-persistence commit. |
 | Dev/staging/production environments | Not started. Only local dev exists (docker-compose Postgres + `npm run dev:*`). No staging/prod hosting target chosen yet. Not a Phase 0B blocker. |
 | Logging | Partial — Fastify's built-in pino logger is on by default (see the request logs in `npm run test` output). No log aggregation/shipping anywhere. |
 | Monitoring | Not started. |
 | Backups | Not started — no real database with real data yet, so nothing to back up. |
-| Migration system | Done — Drizzle + drizzle-kit wired up; `src/db/schema.ts` has one infra-proving table (`system_health_checks`), not domain schema. |
+| Migration system | Done — Drizzle + drizzle-kit wired up. Since outgrown: `src/db/schema.ts` now has real domain schema too (identity/session/WebAuthn tables, migrations `0001`–`0002`), not just the original infra-proving `system_health_checks` table. |
 | Infrastructure-as-code | Not started — docker-compose.yml covers local dev only, no Terraform/equivalent for staging/prod. |
 | Dependency audit | Done — `npm audit` triaged; see "Dependency audit" section below. |
 
@@ -329,6 +337,11 @@ here. Re-check `npm audit` when drizzle-kit cuts a new release.
   this session. Don't mistake a passing passkey-registration test for
   evidence that its AMK wrap works end-to-end; it only proves the server
   correctly stores-and-never-reads whatever it's given.
+- CI logs a deprecation warning (not a failure) that `actions/checkout@v4`
+  and `actions/setup-node@v4` target Node 20, which GitHub is forcing onto
+  Node 24 runners in the meantime. Bump both actions to their Node
+  24-native major version next time `.github/workflows/ci.yml` is touched
+  for another reason — not urgent enough to justify a dedicated pass.
 
 ## Hard gate: no real account data before ops infra exists
 
@@ -396,6 +409,16 @@ block Phase 0B and none should be designed now:
   slice is about to ship the same way.
 
 ## Next tasks, in order
+
+Do not start Phase 1 (or any later phase) before these three are done —
+per an external review of this repo (2026-08-09): the identity/key
+foundation everything else builds on should be solid before more surface
+area sits on top of it, and "solid" specifically means real passkey-based
+AMK unlock, not just passkey login, plus the recovery-path and step-up
+items below. Passkey login authenticating an identity is not the same as
+a complete passwordless encrypted-data-unlock path — see the AMK
+architecture-decision notes above for exactly where that line falls
+today.
 
 1. AMK-wrap-via-passkey (WebAuthn PRF extension) — replaces the honest
    `"prf-not-yet-implemented"` placeholder with a real wrap, so passkey
