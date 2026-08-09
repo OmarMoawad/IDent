@@ -5,17 +5,29 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-08 (session 3 — architecture-hardening pass: AMK key
-hierarchy, immutable identity_id, modular-monolith note, AI/vault grant
-mechanism, terminal wording, no-real-data gate, future-gaps log).
+Last updated: 2026-08-09 (session 4 — Phase 0B slice: username+password
+Identity Core. Identity/session schema, scrypt password hashing, bearer
+session tokens, register/login/logout/me routes, CI now migrates before
+running tests. Passkey/WebAuthn and real client-side AMK generation are not
+built yet — see "Next tasks" below).
 
 ## Current phase
 
-**Phase 0A — Repository becomes executable** (ROADMAP.md Era I). Core
-checklist (migrations, CI, dependency audit) is now verified end-to-end.
-Remaining 0A gaps are staging/prod-environment items that don't block
-Phase 0B per the roadmap's gating rule (that rule gates on identity/data
-integrity infra, not on hosting). Phase 0B (Identity Core) has not started.
+**Phase 0B — Identity Core** (ROADMAP.md Phase 0), in progress. Phase 0A
+(ROADMAP.md Era I) is fully done — see its checklist below, unchanged since
+session 3.
+
+Done in this slice: a user can register with a username + password, log in
+(including a second concurrent session — nothing prevents multiple active
+sessions per identity, which is what "log in from two devices" in Phase 0's
+exit criteria requires), call `/identity/me` with the returned bearer token,
+and log out to revoke that specific session. Password hashes and session
+tokens are real (scrypt, sha256-hashed tokens) — this is not a stub.
+
+Not done: passkey/WebAuthn (password is currently the only factor), real
+client-side AMK generation (apps/web is still a placeholder — see below),
+step-up auth for High/Critical tier modules, and any UI at all (this slice
+is API-only, exercised via `app.inject` in tests and curl/HTTP by hand).
 
 ### 0A checklist status
 
@@ -46,6 +58,17 @@ integrity infra, not on hosting). Phase 0B (Identity Core) has not started.
   with no DB running and curling the endpoint directly.
 - Next.js production build (`npm run build -w apps/web`) compiles and
   prerenders the placeholder page successfully.
+- Phase 0B: `identities`, `username_aliases`, `password_credentials`,
+  `account_master_key_wraps`, and `sessions` tables exist and migrated
+  clean against a live Postgres (migration `0001_stormy_silk_fever.sql`).
+  `POST /identity/register`, `POST /identity/login`, `POST /identity/logout`,
+  and `GET /identity/me` are implemented and covered by 16 passing tests run
+  against that live DB (register success/duplicate-username/invalid-
+  username/weak-password, login success/wrong-password/unknown-username,
+  session validation success/missing-token/invalid-token, logout revokes the
+  session so a follow-up `/identity/me` with the same token now 401s).
+  `npm run typecheck`, `npm run test`, and `npm run build` all pass across
+  every workspace with this slice in.
 
 ## Architecture decisions made in this scaffold
 
@@ -67,6 +90,37 @@ integrity infra, not on hosting). Phase 0B (Identity Core) has not started.
   `apps/*` (root `package.json`'s `workspaces` array is ordered that way on
   purpose) because `@ident/api` and `@ident/web` import types from
   `@ident/shared`'s compiled `dist/`, not its `src/`.
+- **Password hashing is Node's built-in `crypto.scrypt`, not a new
+  dependency (no argon2/bcrypt package added)**. OWASP-recommended params
+  (N=2^17, r=8, p=1, ~128 MiB/hash), PHC-like encoding
+  (`scrypt$N$r$p$salt$hash`) so params travel with each hash and can be
+  tuned up later without breaking old ones. Chosen specifically to avoid
+  argon2's native-addon build step, given the dependency audit already
+  logged native install scripts (esbuild, sharp, fsevents) getting blocked
+  by this machine's `allowScripts` policy — scrypt needed zero new deps and
+  zero native builds.
+- **Session tokens are a random 32-byte value returned once at issuance;
+  only its sha256 hash is ever persisted** (`sessions.token_hash`), so a
+  database read alone can't produce a usable session token. Base session
+  TTL is 24h with no refresh-token flow yet (SECURITY.md's tiering implies a
+  shorter step-up session on top of this base one for High/Critical
+  modules — not built this slice, see "Next tasks").
+- **Login is timing-safe against username enumeration**: a login for a
+  username that doesn't exist still runs a full scrypt verify (against a
+  fixed dummy hash, computed once and cached) before returning 401, so
+  "no such user" and "wrong password" take the same wall-clock time.
+- **`validateSession()` is a plain function other modules import directly,
+  not an HTTP call to Identity Core** — matches ARCHITECTURE.md's
+  current-phase note that Phase 0–2 is a modular monolith. Becomes a real
+  network call only once a module is split into its own deployment.
+- **`account_master_key_wraps.wrapped_key` is accepted from the caller as
+  an opaque string and never interpreted server-side.** Nothing generates a
+  *real* Account Master Key yet — apps/web is still a placeholder page with
+  no WebCrypto in it — so today `wrappedAmkKey` is just whatever the caller
+  (currently: tests) sends. The column and the "never unwrap server-side"
+  contract exist now because retrofitting them after real user data exists
+  is expensive; the actual client-side AMK generation is unbuilt, tracked
+  in "Next tasks."
 
 ## Dependency audit (2026-08-08)
 
@@ -120,9 +174,17 @@ here. Re-check `npm audit` when drizzle-kit cuts a new release.
   if something platform-specific breaks later (sharp in particular is
   image-processing native code — irrelevant until a module actually needs
   image handling).
-- The new migration file (`apps/api/src/db/migrations/0000_large_emma_frost.sql`)
-  and `apps/api/vitest.config.ts` are untracked as of this update — not yet
-  committed/pushed. See "Next tasks" below.
+- CI's Postgres service never ran migrations before this slice — harmless
+  when `/health`'s `SELECT 1` was the only DB-touching test, but the new
+  identity tests need real tables. Fixed by adding
+  `npm run db:migrate -w apps/api` to `.github/workflows/ci.yml` between
+  `typecheck` and `test`. Verify the next CI run actually picks this up
+  (see "Next tasks").
+- `wrappedAmkKey` has no real producer yet (see the AMK architecture-decision
+  note above) — every caller today, including all tests, sends an arbitrary
+  placeholder string. Not a bug, but don't mistake a passing register test
+  for evidence that AMK wrapping actually works end-to-end; it only proves
+  the server correctly stores-and-never-reads whatever it's given.
 
 ## Hard gate: no real account data before ops infra exists
 
@@ -160,17 +222,31 @@ block Phase 0B and none should be designed now:
   per-module (vault shares, biometric payment authorizations) but has no
   first-class, tamper-evident, cross-module design yet. Worth doing once
   enough modules exist to need a shared retention/query story.
+- **Step-up auth / elevated sessions** (Phase 3+, per SECURITY.md's
+  tiering) — the base session built this slice unlocks Low/Medium tier
+  modules only; High/Critical need a second, shorter-lived elevated session
+  layered on top (re-enter password/passkey + device-local biometric).
+  Not designed yet beyond that one sentence in SECURITY.md. Needed before
+  any High/Critical-tier module (Phase 3+) ships a write path.
 
 ## Next tasks, in order
 
-1. Review and commit the pending changes (dependency bumps in both
-   `package.json`s, `package-lock.json`, the generated migration file, the
-   new `apps/api/vitest.config.ts`, and the Next-auto-generated
-   `tsconfig.json`/`next-env.d.ts` diffs), then push and re-confirm CI is
-   still green with the new dependency versions.
-2. Only then: start Phase 0B (Identity Core) — username+password identity,
-   passkey/WebAuthn, session/key management, per ARCHITECTURE.md's Identity
-   Core section.
+1. Commit and push this Phase 0B slice (identity/session schema, password
+   hashing, session tokens, register/login/logout/me routes, the CI
+   migrate-before-test fix), then re-confirm CI is green — CI now runs a
+   real migration step it didn't before, so this is the first push that
+   actually tests that path.
+2. Passkey/WebAuthn as the recommended default (ARCHITECTURE.md's Identity
+   Core says password is the fallback, not the primary) — nothing built yet,
+   password is currently the only factor.
+3. Real client-side AMK generation in apps/web (WebCrypto: generate the
+   Account Master Key, derive a password-based KEK, wrap the AMK, POST the
+   wrapped blob to `/identity/register`) — replaces today's opaque
+   passthrough with the real mechanism ARCHITECTURE.md describes.
+4. Step-up auth / elevated sessions for High/Critical tier modules — see the
+   future-gaps entry above. Not needed until a Phase 3+ module ships a write
+   path, but the base-session/elevated-session split is easier to add before
+   any module depends on "one session tier" than after.
 
 ## Deployment instructions
 
@@ -179,15 +255,25 @@ None yet — there is no staging or production target. Local-only: see
 
 ## Security assumptions
 
-- Nothing sensitive is stored anywhere in this repo yet — no user data, no
-  credentials, no keys. The only table that exists (`system_health_checks`)
-  holds a timestamp and nothing else.
+- Password hashes (scrypt, salted, no reversible storage) and session-token
+  hashes are now stored in the database — but only in local dev and CI's
+  ephemeral Postgres containers, both created and destroyed per run/session.
+  The hard gate above still blocks any real account existing anywhere else
+  (no staging/prod target exists to gate). Nobody's real password or session
+  has ever touched this system.
 - `.env` is gitignored; `.env.example` has placeholder local-dev credentials
   only (`ident`/`ident`), never used outside `docker-compose.yml`'s local
   container.
-- No auth exists yet at all — the API has one public, unauthenticated route
-  (`/health`). This is fine only because Phase 0A adds no other routes;
-  Phase 0B must not ship a second route without auth already in place.
+- `/health`, `/identity/register`, and `/identity/login` are intentionally
+  public/unauthenticated — the latter two have to be, to bootstrap an
+  identity or a session in the first place. `/identity/me` and
+  `/identity/logout` require a valid, unrevoked, unexpired bearer session
+  token (`Authorization: Bearer <token>`); an invalid/missing/expired/
+  revoked token gets 401, never a 500 or a silent pass-through. Any new
+  route added from Phase 0B onward that isn't itself part of
+  registration/login must sit behind `validateSession()` — Phase 0A's old
+  "no second route without auth" rule now has a concrete mechanism to
+  enforce it with.
 
 ## External approvals pending
 

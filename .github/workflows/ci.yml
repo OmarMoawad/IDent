@@ -39,6 +39,8 @@ jobs:
 
       - run: npm run typecheck
 
+      - run: npm run db:migrate -w apps/api
+
       - run: npm run test
 
       - run: npm run build
