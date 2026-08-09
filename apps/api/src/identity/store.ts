@@ -77,6 +77,27 @@ export async function findIdentityByUsername(username: string): Promise<Identity
   return rows[0] ?? null;
 }
 
+export type AmkWrap = {
+  identityId: string;
+  factor: string;
+  wrappedKey: string;
+};
+
+/**
+ * Adds or replaces the wrap for one (identity, factor) pair — used when a
+ * factor is registered for the first time, or re-registered after removal
+ * (e.g. a replaced passkey), never to touch another factor's row.
+ */
+export async function upsertAmkWrap(input: AmkWrap): Promise<void> {
+  await db
+    .insert(accountMasterKeyWraps)
+    .values(input)
+    .onConflictDoUpdate({
+      target: [accountMasterKeyWraps.identityId, accountMasterKeyWraps.factor],
+      set: { wrappedKey: input.wrappedKey, updatedAt: new Date() },
+    });
+}
+
 export async function insertSession(input: {
   identityId: string;
   tokenHash: string;

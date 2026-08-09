@@ -5,11 +5,11 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-09 (session 4 — Phase 0B slice: username+password
-Identity Core. Identity/session schema, scrypt password hashing, bearer
-session tokens, register/login/logout/me routes, CI now migrates before
-running tests. Passkey/WebAuthn and real client-side AMK generation are not
-built yet — see "Next tasks" below).
+Last updated: 2026-08-09 (session 5 — Phase 0B slice: passkey/WebAuthn.
+Registration and authentication ceremonies via @simplewebauthn/server,
+webauthn_credentials/webauthn_challenges tables, a hand-rolled software
+authenticator so tests exercise real ECDSA signature verification. Real
+client-side AMK generation is still not built — see "Next tasks" below).
 
 ## Current phase
 
@@ -17,17 +17,21 @@ built yet — see "Next tasks" below).
 (ROADMAP.md Era I) is fully done — see its checklist below, unchanged since
 session 3.
 
-Done in this slice: a user can register with a username + password, log in
+Done so far: a user can register with a username + password, log in
 (including a second concurrent session — nothing prevents multiple active
 sessions per identity, which is what "log in from two devices" in Phase 0's
 exit criteria requires), call `/identity/me` with the returned bearer token,
-and log out to revoke that specific session. Password hashes and session
-tokens are real (scrypt, sha256-hashed tokens) — this is not a stub.
+log out to revoke that specific session, register a passkey on an
+already-logged-in identity, and log in with that passkey instead of a
+password. Password hashes, session tokens, and passkey credentials/
+signatures are all real (scrypt, sha256-hashed tokens, genuine ECDSA P-256
+verification) — none of this is stubbed.
 
-Not done: passkey/WebAuthn (password is currently the only factor), real
-client-side AMK generation (apps/web is still a placeholder — see below),
-step-up auth for High/Critical tier modules, and any UI at all (this slice
-is API-only, exercised via `app.inject` in tests and curl/HTTP by hand).
+Not done: real client-side AMK generation (apps/web is still a placeholder
+— see below), step-up auth for High/Critical tier modules, and any UI at
+all (this slice is API-only, exercised via `app.inject` in tests and
+curl/HTTP by hand — there is no navigator.credentials call anywhere, the
+software authenticator in tests replaces the browser entirely).
 
 ### 0A checklist status
 
@@ -69,6 +73,20 @@ is API-only, exercised via `app.inject` in tests and curl/HTTP by hand).
   session so a follow-up `/identity/me` with the same token now 401s).
   `npm run typecheck`, `npm run test`, and `npm run build` all pass across
   every workspace with this slice in.
+- Passkey/WebAuthn: `webauthn_credentials` and `webauthn_challenges` tables
+  (migration `0002_sweet_bloodstrike.sql`), `POST /identity/webauthn/
+  register/options`, `/register/verify`, `/login/options`, `/login/verify`.
+  7 new tests (23 total in the API workspace now) cover: successful passkey
+  registration, registration rejected without a session, a consumed
+  registration challenge can't be replayed, successful passkey login end to
+  end (including that the returned session actually authenticates against
+  `/identity/me`), login-options rejected for an unknown username, a
+  tampered assertion signature rejected, and a consumed login challenge
+  can't be replayed. All of it runs against real
+  `@simplewebauthn/server` verification and a hand-rolled software
+  authenticator (`identity/test-support/software-authenticator.ts`) that
+  generates genuine ECDSA P-256 keypairs and signs real CBOR-encoded
+  attestation/assertion data — no step of the crypto path is mocked.
 
 ## Architecture decisions made in this scaffold
 
@@ -121,6 +139,45 @@ is API-only, exercised via `app.inject` in tests and curl/HTTP by hand).
   contract exist now because retrofitting them after real user data exists
   is expensive; the actual client-side AMK generation is unbuilt, tracked
   in "Next tasks."
+- **`@simplewebauthn/server` for WebAuthn, not a hand-rolled verifier.**
+  Attestation/assertion verification (CBOR parsing, COSE key handling,
+  ECDSA/RSA signature checks, origin/RP-ID/counter validation) is exactly
+  the kind of security-critical parsing code that should use a vetted
+  library, unlike password hashing where Node's own `crypto.scrypt`
+  sufficed. Pure-JS dependency tree (`@hexagon/base64`,
+  `@levischuck/tiny-cbor`, `@peculiar/*`) — no native builds, consistent
+  with the scrypt decision's reasoning.
+- **A passkey is registered as a second factor on an already-authenticated
+  identity, not as a way to create one.** `/identity/webauthn/register/*`
+  requires a valid bearer session; there's no passwordless sign-up path
+  yet. Matches ARCHITECTURE.md's "password remains a fallback" — passkey
+  is additive here, not a replacement, until passwordless registration is
+  deliberately designed (recovery-path implications if the *only* factor
+  is a passkey and the device is lost aren't addressed yet).
+- **The passkey's AMK wrap is opaque-passthrough, same convention as
+  password's** — `wrappedAmkKey` in `/register/verify`'s body is stored
+  under `account_master_key_wraps` with `factor: 'passkey'` and never
+  interpreted server-side. Real passkey-derived AMK wrapping needs the
+  WebAuthn PRF (or largeBlob) extension, whose browser/authenticator
+  support is inconsistent enough that designing it now would be guessing;
+  deferred on purpose (see "Next tasks"), not an oversight.
+- **Login-options for an unknown username returns 401, unlike password
+  login** — password login is timing-safe against username enumeration
+  (a dummy scrypt verify runs either way); `/identity/webauthn/login/
+  options` doesn't have an equivalent camouflage, because faking a
+  plausible `allowCredentials` list for a nonexistent identity without a
+  real per-user deterministic-but-unlinkable credential set is
+  meaningfully harder than the password case's fixed-dummy-hash trick.
+  Accepted as a known, narrow username-enumeration gap on this one
+  endpoint — logged rather than silently left implicit — not worth solving
+  ahead of Phase 0's actual UI existing to see how much it matters in
+  practice.
+- **Challenges are single-use and consumed atomically** (`webauthn_
+  challenges.consumed_at`, set inside a transaction that re-checks
+  `consumed_at IS NULL` on the UPDATE) — a race between two concurrent
+  verify calls for the same challenge can't both succeed; the loser's
+  UPDATE affects zero rows once Postgres re-evaluates the WHERE clause
+  against the just-committed row. 5-minute challenge TTL.
 
 ## Dependency audit (2026-08-08)
 
@@ -228,25 +285,42 @@ block Phase 0B and none should be designed now:
   layered on top (re-enter password/passkey + device-local biometric).
   Not designed yet beyond that one sentence in SECURITY.md. Needed before
   any High/Critical-tier module (Phase 3+) ships a write path.
+- **Passwordless registration** — today a passkey can only be *added* to an
+  identity that already has a password (see the architecture-decision note
+  above). Registering with only a passkey, no password, is a real Phase 0
+  goal (ARCHITECTURE.md's "password remains a fallback" implies passkey can
+  be primary) but needs its own recovery-path thinking first — an identity
+  whose only factor is a passkey on a lost device needs a designed way
+  back in, not an afterthought.
+- **AMK-wrap-via-passkey (PRF/largeBlob extension)** — see the
+  architecture-decision note above. Revisit once real client-side AMK
+  generation (Next tasks #2) exists and browser/authenticator PRF support
+  is worth re-checking.
+- **WebAuthn login-options username enumeration** — see the
+  architecture-decision note above. A narrow, accepted gap specific to
+  `/identity/webauthn/login/options`; password login already closed the
+  equivalent hole.
 
 ## Next tasks, in order
 
-1. Commit and push this Phase 0B slice (identity/session schema, password
-   hashing, session tokens, register/login/logout/me routes, the CI
-   migrate-before-test fix), then re-confirm CI is green — CI now runs a
-   real migration step it didn't before, so this is the first push that
-   actually tests that path.
-2. Passkey/WebAuthn as the recommended default (ARCHITECTURE.md's Identity
-   Core says password is the fallback, not the primary) — nothing built yet,
-   password is currently the only factor.
-3. Real client-side AMK generation in apps/web (WebCrypto: generate the
+1. Passkey UI in apps/web (currently a placeholder page) — call
+   `navigator.credentials.create()`/`.get()` against the ceremonies built
+   this slice. Until this exists, WebAuthn is only exercised by tests and
+   the hand-rolled software authenticator, never a real browser/
+   authenticator.
+2. Real client-side AMK generation in apps/web (WebCrypto: generate the
    Account Master Key, derive a password-based KEK, wrap the AMK, POST the
    wrapped blob to `/identity/register`) — replaces today's opaque
-   passthrough with the real mechanism ARCHITECTURE.md describes.
-4. Step-up auth / elevated sessions for High/Critical tier modules — see the
-   future-gaps entry above. Not needed until a Phase 3+ module ships a write
-   path, but the base-session/elevated-session split is easier to add before
-   any module depends on "one session tier" than after.
+   passthrough with the real mechanism ARCHITECTURE.md describes. Natural
+   to build alongside #1 since both need apps/web to stop being a
+   placeholder.
+3. Passwordless registration — see the future-gaps entry above. Do this
+   only after #1/#2 exist to build a UI against, and only with the
+   recovery-path question answered first.
+4. Step-up auth / elevated sessions for High/Critical tier modules — see
+   the future-gaps entry above. Not needed until a Phase 3+ module ships a
+   write path, but the base-session/elevated-session split is easier to
+   add before any module depends on "one session tier" than after.
 
 ## Deployment instructions
 
@@ -264,16 +338,23 @@ None yet — there is no staging or production target. Local-only: see
 - `.env` is gitignored; `.env.example` has placeholder local-dev credentials
   only (`ident`/`ident`), never used outside `docker-compose.yml`'s local
   container.
-- `/health`, `/identity/register`, and `/identity/login` are intentionally
-  public/unauthenticated — the latter two have to be, to bootstrap an
-  identity or a session in the first place. `/identity/me` and
-  `/identity/logout` require a valid, unrevoked, unexpired bearer session
-  token (`Authorization: Bearer <token>`); an invalid/missing/expired/
-  revoked token gets 401, never a 500 or a silent pass-through. Any new
-  route added from Phase 0B onward that isn't itself part of
-  registration/login must sit behind `validateSession()` — Phase 0A's old
-  "no second route without auth" rule now has a concrete mechanism to
-  enforce it with.
+- `/health`, `/identity/register`, `/identity/login`, and
+  `/identity/webauthn/login/{options,verify}` are intentionally
+  public/unauthenticated — they have to be, to bootstrap an identity or a
+  session in the first place. `/identity/me`, `/identity/logout`, and
+  `/identity/webauthn/register/{options,verify}` require a valid,
+  unrevoked, unexpired bearer session token
+  (`Authorization: Bearer <token>`); an invalid/missing/expired/revoked
+  token gets 401, never a 500 or a silent pass-through. Any new route added
+  from Phase 0B onward that isn't itself part of registration/login must
+  sit behind `validateSession()` — Phase 0A's old "no second route without
+  auth" rule now has a concrete mechanism to enforce it with.
+- WebAuthn responses are attacker-controlled JSON off the wire; both verify
+  functions wrap the library's verify call in a `.catch` that treats any
+  thrown error (malformed base64url, missing fields, decode failures) the
+  same as `verified: false`, so a deliberately broken payload can't turn
+  into an unhandled 500 — see the architecture-decision notes above for the
+  known, narrow exception (login-options username enumeration).
 
 ## External approvals pending
 

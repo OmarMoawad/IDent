@@ -1,4 +1,4 @@
-import { pgTable, primaryKey, serial, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { integer, pgTable, primaryKey, serial, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Phase 0A infra-proving table only — confirms migrations run end to end.
@@ -83,3 +83,48 @@ export const sessions = pgTable(
   },
   (table) => [uniqueIndex("sessions_token_hash_idx").on(table.tokenHash)],
 );
+
+/**
+ * A registered WebAuthn authenticator, one row per credential (an identity
+ * can register more than one — phone + hardware key, say). credentialId is
+ * the authenticator-chosen identifier (base64url); publicKey is the COSE
+ * public key bytes (base64url) used to verify future assertion signatures.
+ * counter is the authenticator's signature counter, used to detect cloned
+ * authenticators (per WebAuthn spec: it must strictly increase).
+ */
+export const webauthnCredentials = pgTable(
+  "webauthn_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    credentialId: text("credential_id").notNull(),
+    publicKey: text("public_key").notNull(),
+    counter: integer("counter").notNull(),
+    transports: text("transports"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (table) => [uniqueIndex("webauthn_credentials_credential_id_idx").on(table.credentialId)],
+);
+
+/**
+ * A pending registration or authentication ceremony's server-generated
+ * challenge, so the verify step can confirm the signed response answers the
+ * exact challenge this server issued (replay/substitution protection).
+ * Short-lived and single-use — consumedAt is set the moment it's checked,
+ * pass or fail, so a challenge can never be replayed even after a failed
+ * verify.
+ */
+export const webauthnChallenges = pgTable("webauthn_challenges", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  identityId: uuid("identity_id")
+    .notNull()
+    .references(() => identities.id, { onDelete: "cascade" }),
+  purpose: text("purpose").notNull(),
+  challenge: text("challenge").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+});

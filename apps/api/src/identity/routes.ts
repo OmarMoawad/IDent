@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { extractBearerToken, requireStrings } from "./http.js";
 import {
   InvalidCredentialsError,
   InvalidUsernameError,
@@ -12,18 +13,6 @@ import {
 
 type RegisterBody = { username?: unknown; password?: unknown; wrappedAmkKey?: unknown };
 type LoginBody = { username?: unknown; password?: unknown };
-
-function extractBearerToken(header: string | undefined): string | null {
-  if (!header?.startsWith("Bearer ")) return null;
-  const token = header.slice("Bearer ".length).trim();
-  return token.length > 0 ? token : null;
-}
-
-function requireStrings(body: Record<string, unknown>, keys: string[]): string[] | null {
-  const values = keys.map((key) => body[key]);
-  if (values.some((value) => typeof value !== "string" || value.length === 0)) return null;
-  return values as string[];
-}
 
 export function registerIdentityRoutes(app: FastifyInstance): void {
   app.post<{ Body: RegisterBody }>("/identity/register", async (request, reply) => {

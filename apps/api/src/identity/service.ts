@@ -63,7 +63,7 @@ export type Session = {
   expiresAt: Date;
 };
 
-async function issueSession(identityId: string, username: string): Promise<Session> {
+export async function issueSession(identityId: string, username: string): Promise<Session> {
   const sessionToken = generateSessionToken();
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
   await insertSession({ identityId, tokenHash: hashSessionToken(sessionToken), expiresAt });
