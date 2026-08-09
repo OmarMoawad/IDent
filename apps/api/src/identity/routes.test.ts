@@ -170,3 +170,46 @@ describe("POST /identity/logout", () => {
     await app.close();
   });
 });
+
+describe("GET /identity/amk-wrap", () => {
+  it("returns the wrap stored at registration, defaulting to the password factor", async () => {
+    const app = buildApp();
+    const { response: registerResponse } = await registerUser(app, {
+      wrappedAmkKey: "the-exact-blob-sent-at-registration",
+    });
+    const { sessionToken } = registerResponse.json();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/identity/amk-wrap",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ factor: "password", wrappedKey: "the-exact-blob-sent-at-registration" });
+
+    await app.close();
+  });
+
+  it("rejects a missing session token", async () => {
+    const app = buildApp();
+    const response = await app.inject({ method: "GET", url: "/identity/amk-wrap" });
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("404s for a factor with no stored wrap", async () => {
+    const app = buildApp();
+    const { response: registerResponse } = await registerUser(app);
+    const { sessionToken } = registerResponse.json();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/identity/amk-wrap?factor=passkey",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+});

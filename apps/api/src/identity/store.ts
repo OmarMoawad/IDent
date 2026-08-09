@@ -98,6 +98,15 @@ export async function upsertAmkWrap(input: AmkWrap): Promise<void> {
     });
 }
 
+export async function findAmkWrap(identityId: string, factor: string): Promise<string | null> {
+  const rows = await db
+    .select({ wrappedKey: accountMasterKeyWraps.wrappedKey })
+    .from(accountMasterKeyWraps)
+    .where(and(eq(accountMasterKeyWraps.identityId, identityId), eq(accountMasterKeyWraps.factor, factor)))
+    .limit(1);
+  return rows[0]?.wrappedKey ?? null;
+}
+
 export async function insertSession(input: {
   identityId: string;
   tokenHash: string;

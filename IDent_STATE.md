@@ -5,11 +5,13 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-09 (session 5 — Phase 0B slice: passkey/WebAuthn.
-Registration and authentication ceremonies via @simplewebauthn/server,
-webauthn_credentials/webauthn_challenges tables, a hand-rolled software
-authenticator so tests exercise real ECDSA signature verification. Real
-client-side AMK generation is still not built — see "Next tasks" below).
+Last updated: 2026-08-09 (session 6 — Phase 0B slice: apps/web stops being
+a placeholder. Register/login/account pages, real client-side AMK
+generation via WebCrypto (PBKDF2 + AES-GCM), passkey registration/login
+wired to @simplewebauthn/browser, a new GET /identity/amk-wrap endpoint,
+and CORS. Manually verified end to end in a real browser — the first time
+any of this identity work has been driven by an actual browser instead of
+tests. See "Next tasks" below for what's still not built).
 
 ## Current phase
 
@@ -17,21 +19,27 @@ client-side AMK generation is still not built — see "Next tasks" below).
 (ROADMAP.md Era I) is fully done — see its checklist below, unchanged since
 session 3.
 
-Done so far: a user can register with a username + password, log in
-(including a second concurrent session — nothing prevents multiple active
-sessions per identity, which is what "log in from two devices" in Phase 0's
-exit criteria requires), call `/identity/me` with the returned bearer token,
-log out to revoke that specific session, register a passkey on an
-already-logged-in identity, and log in with that passkey instead of a
-password. Password hashes, session tokens, and passkey credentials/
-signatures are all real (scrypt, sha256-hashed tokens, genuine ECDSA P-256
-verification) — none of this is stubbed.
+Done so far: register with a username + password (with a real client-side
+Account Master Key generated, wrapped, and sent to the server), log in with
+that password (including a second concurrent session — nothing prevents
+multiple active sessions per identity, which is what "log in from two
+devices" in Phase 0's exit criteria requires), have the AMK fetched back
+and unwrapped locally after login, register a passkey on an
+already-logged-in identity, log in with that passkey instead of a
+password, and log out. All of this now has a real UI in apps/web
+(`/register`, `/login`, `/account`) — manually clicked through end to end
+in an actual browser: register → account (AMK loaded) → register a passkey
+→ log out → log in with password (AMK loaded again) → log in with passkey
+instead (AMK correctly *not* available this session, since passkey login
+can't unwrap it yet). Password hashes, session tokens, passkey
+credentials/signatures, and the AMK wrap/unwrap round-trip are all real —
+none of this is stubbed.
 
-Not done: real client-side AMK generation (apps/web is still a placeholder
-— see below), step-up auth for High/Critical tier modules, and any UI at
-all (this slice is API-only, exercised via `app.inject` in tests and
-curl/HTTP by hand — there is no navigator.credentials call anywhere, the
-software authenticator in tests replaces the browser entirely).
+Not done: real passkey-derived AMK wrapping (the passkey factor still
+sends an honest placeholder, not a working wrap — see below), step-up auth
+for High/Critical tier modules, passwordless registration, and any
+persistence of the session across a page reload (auth state is deliberately
+in-memory only right now).
 
 ### 0A checklist status
 
@@ -87,6 +95,22 @@ software authenticator in tests replaces the browser entirely).
   authenticator (`identity/test-support/software-authenticator.ts`) that
   generates genuine ECDSA P-256 keypairs and signs real CBOR-encoded
   attestation/assertion data — no step of the crypto path is mocked.
+- apps/web: `/register`, `/login`, `/account` pages (Next.js App Router,
+  client components), replacing the Phase 0A placeholder. `GET
+  /identity/amk-wrap` added to the API (3 new tests, 26 total) so a client
+  can fetch its own wrapped AMK back after logging in. `apps/web/lib/amk.ts`
+  does real client-side AMK generation/wrap/unwrap with WebCrypto
+  (PBKDF2-SHA256 → AES-GCM). CORS added to the API
+  (`@fastify/cors`) so the browser can call it cross-origin in dev.
+  `packages/shared` gained its first real shared type
+  (`IdentitySession`) — the session-shape sharing the Phase 0A notes
+  anticipated. Manually verified in a real browser (not just curl/tests):
+  register → account (AMK loaded) → register a passkey → log out → log in
+  with password (AMK loaded again) → log in with passkey instead (AMK
+  correctly unavailable). `npm run typecheck`, `npm run test`, and
+  `npm run build` all pass across every workspace with this slice in — no
+  new dependency-audit findings from `@fastify/cors`,
+  `@simplewebauthn/browser`, or the shared-type change.
 
 ## Architecture decisions made in this scaffold
 
@@ -132,13 +156,13 @@ software authenticator in tests replaces the browser entirely).
   current-phase note that Phase 0–2 is a modular monolith. Becomes a real
   network call only once a module is split into its own deployment.
 - **`account_master_key_wraps.wrapped_key` is accepted from the caller as
-  an opaque string and never interpreted server-side.** Nothing generates a
-  *real* Account Master Key yet — apps/web is still a placeholder page with
-  no WebCrypto in it — so today `wrappedAmkKey` is just whatever the caller
-  (currently: tests) sends. The column and the "never unwrap server-side"
-  contract exist now because retrofitting them after real user data exists
-  is expensive; the actual client-side AMK generation is unbuilt, tracked
-  in "Next tasks."
+  an opaque string and never interpreted server-side.** As of this session
+  apps/web's password-factor registration sends a *real* wrapped AMK
+  (see the AMK-crypto architecture-decision note below); the passkey
+  factor still sends a placeholder (see its own note below). The column
+  and the "never unwrap server-side" contract were added before either
+  producer existed, specifically so retrofitting them after real user data
+  exists wouldn't be necessary.
 - **`@simplewebauthn/server` for WebAuthn, not a hand-rolled verifier.**
   Attestation/assertion verification (CBOR parsing, COSE key handling,
   ECDSA/RSA signature checks, origin/RP-ID/counter validation) is exactly
@@ -178,6 +202,52 @@ software authenticator in tests replaces the browser entirely).
   verify calls for the same challenge can't both succeed; the loser's
   UPDATE affects zero rows once Postgres re-evaluates the WHERE clause
   against the just-committed row. 5-minute challenge TTL.
+- **`GET /identity/amk-wrap` lets an authenticated client fetch its own
+  wrapped AMK back out**, defaulting to the `password` factor. This is what
+  makes "log in on a second device and still have your AMK" actually work
+  — register generates and wraps the AMK once; every subsequent login
+  fetches the same wrapped blob and unwraps it locally with the password
+  just entered, rather than each device/session minting its own AMK
+  (which would defeat the point of a single per-identity key hierarchy).
+  Server never sees the unwrapped key at any point in this path.
+- **CORS is a single trusted origin, reused from WebAuthn's `ORIGIN`
+  config** (`identity/webauthn-config.ts`), not a separate env var —
+  the browser origin CORS should trust and the origin WebAuthn ceremonies
+  expect are the same value by construction, so one source of truth is
+  more correct, not just less config.
+- **The AMK crypto (`apps/web/lib/amk.ts`) is real, not a placeholder**:
+  PBKDF2-HMAC-SHA256 at OWASP's 2023-minimum 600,000 iterations derives a
+  KEK from the password, AES-GCM wraps/unwraps the 32-byte AMK, salt+iv+
+  ciphertext travel together as one base64url blob — the same shape the
+  server already stores opaquely. This is Phase 0's actual "baseline E2E
+  encryption primitives" line item, not a stub to revisit — what's still
+  deferred is *using* the AMK to encrypt real module data (nothing needs
+  that yet) and the passkey-factor wrap (next point).
+- **The passkey factor still can't produce a real AMK wrap — the UI is
+  honest about that, not silently broken.** `/account`'s "Register a
+  passkey" button sends the literal placeholder string
+  `"prf-not-yet-implemented"` as `wrappedAmkKey` rather than fabricating
+  ciphertext that looks real but that no passkey can actually unwrap later
+  (the WebAuthn PRF extension this needs is still unbuilt — see "Next
+  tasks"). A passkey registered this way is fully real for *logging in*;
+  it just can't unlock the AMK yet, and the account page's "AMK loaded in
+  memory" / "not available this session" status line reflects that
+  truthfully after either login path.
+- **Auth state (session token + unwrapped AMK) lives in a React context,
+  in memory only — nothing persists across a page reload.** Persisting a
+  session token safely (localStorage is XSS-exposed, cookies need CSRF
+  handling) is a real security design question that Phase 0's placeholder
+  UI doesn't need to answer yet; the AMK specifically should almost
+  certainly *never* go into any persistent browser storage even once that
+  design exists. Logged as a known gap, not an oversight — see "Next
+  tasks."
+- **No frontend automated tests yet** — no Vitest+Testing-Library harness
+  exists for apps/web. This slice was verified by a full manual
+  browser click-through (register → passkey → logout → password login →
+  passkey login) plus the API's 26 passing tests, which already cover
+  every contract these pages call. Adding a real frontend test harness is
+  future work, not silently skipped — worth doing once apps/web has enough
+  pages that manual click-throughs stop scaling.
 
 ## Dependency audit (2026-08-08)
 
@@ -231,17 +301,13 @@ here. Re-check `npm audit` when drizzle-kit cuts a new release.
   if something platform-specific breaks later (sharp in particular is
   image-processing native code — irrelevant until a module actually needs
   image handling).
-- CI's Postgres service never ran migrations before this slice — harmless
-  when `/health`'s `SELECT 1` was the only DB-touching test, but the new
-  identity tests need real tables. Fixed by adding
-  `npm run db:migrate -w apps/api` to `.github/workflows/ci.yml` between
-  `typecheck` and `test`. Verify the next CI run actually picks this up
-  (see "Next tasks").
-- `wrappedAmkKey` has no real producer yet (see the AMK architecture-decision
-  note above) — every caller today, including all tests, sends an arbitrary
-  placeholder string. Not a bug, but don't mistake a passing register test
-  for evidence that AMK wrapping actually works end-to-end; it only proves
-  the server correctly stores-and-never-reads whatever it's given.
+- The passkey factor's `wrappedAmkKey` has no real producer yet (see its
+  architecture-decision note above) — every caller that registers a
+  passkey, including apps/web's UI, sends the literal placeholder string
+  `"prf-not-yet-implemented"`. The password factor's wrap is real as of
+  this session. Don't mistake a passing passkey-registration test for
+  evidence that its AMK wrap works end-to-end; it only proves the server
+  correctly stores-and-never-reads whatever it's given.
 
 ## Hard gate: no real account data before ops infra exists
 
@@ -293,30 +359,36 @@ block Phase 0B and none should be designed now:
   whose only factor is a passkey on a lost device needs a designed way
   back in, not an afterthought.
 - **AMK-wrap-via-passkey (PRF/largeBlob extension)** — see the
-  architecture-decision note above. Revisit once real client-side AMK
-  generation (Next tasks #2) exists and browser/authenticator PRF support
-  is worth re-checking.
+  architecture-decision note above. Revisit once browser/authenticator PRF
+  support is worth re-checking; apps/web's real client-side AMK generation
+  now exists (this session), so this is purely about extending it to a
+  second factor, not building the mechanism from scratch.
 - **WebAuthn login-options username enumeration** — see the
   architecture-decision note above. A narrow, accepted gap specific to
   `/identity/webauthn/login/options`; password login already closed the
   equivalent hole.
+- **Session persistence across a page reload** — see the architecture-
+  decision note above. Needs a deliberate security decision (storage
+  mechanism, XSS/CSRF trade-offs, whether the AMK specifically should ever
+  be re-derivable without re-entering the password), not a quick fix.
+- **No frontend automated test harness** — see the architecture-decision
+  note above. Worth setting up once apps/web has enough surface that
+  manual click-throughs become the bottleneck.
 
 ## Next tasks, in order
 
-1. Passkey UI in apps/web (currently a placeholder page) — call
-   `navigator.credentials.create()`/`.get()` against the ceremonies built
-   this slice. Until this exists, WebAuthn is only exercised by tests and
-   the hand-rolled software authenticator, never a real browser/
-   authenticator.
-2. Real client-side AMK generation in apps/web (WebCrypto: generate the
-   Account Master Key, derive a password-based KEK, wrap the AMK, POST the
-   wrapped blob to `/identity/register`) — replaces today's opaque
-   passthrough with the real mechanism ARCHITECTURE.md describes. Natural
-   to build alongside #1 since both need apps/web to stop being a
-   placeholder.
-3. Passwordless registration — see the future-gaps entry above. Do this
-   only after #1/#2 exist to build a UI against, and only with the
-   recovery-path question answered first.
+1. AMK-wrap-via-passkey (WebAuthn PRF extension) — replaces the honest
+   `"prf-not-yet-implemented"` placeholder with a real wrap, so passkey
+   login can unlock the AMK the same way password login already does. See
+   the future-gaps entry above for why this was deferred rather than
+   guessed at.
+2. Passwordless registration — see the future-gaps entry above. Now that
+   real passkey UI exists to build against, the remaining blocker is
+   purely the recovery-path design (an identity whose only factor is a
+   passkey on a lost device needs a designed way back in).
+3. Session persistence across a page reload — see the future-gaps entry
+   above. A real security design question (storage mechanism, XSS/CSRF
+   trade-offs), not a quick fix.
 4. Step-up auth / elevated sessions for High/Critical tier modules — see
    the future-gaps entry above. Not needed until a Phase 3+ module ships a
    write path, but the base-session/elevated-session split is easier to
@@ -349,6 +421,20 @@ None yet — there is no staging or production target. Local-only: see
   from Phase 0B onward that isn't itself part of registration/login must
   sit behind `validateSession()` — Phase 0A's old "no second route without
   auth" rule now has a concrete mechanism to enforce it with.
+  `GET /identity/amk-wrap` follows the same rule.
+- CORS (`@fastify/cors`) restricts the API to a single allowed origin
+  (`identity/webauthn-config.ts`'s `ORIGIN`, defaulting to
+  `http://localhost:3000` in dev) — not `origin: true`/wildcard. There's
+  no cookie-based session for CSRF to exploit (bearer tokens are sent
+  explicitly by client code, never attached automatically by the browser),
+  so CORS here is about which origins can *read* responses, not about
+  protecting a standing credential.
+- The unwrapped AMK exists only as a `Uint8Array` in a React context in
+  browser memory — it is never written to localStorage, sessionStorage,
+  IndexedDB, or any other persistent store, and never leaves the browser
+  except as its password-wrapped ciphertext at registration. A page reload
+  loses it, which is intentional (see the future-gaps entry on session
+  persistence) not a bug to route around by weakening this.
 - WebAuthn responses are attacker-controlled JSON off the wire; both verify
   functions wrap the library's verify call in a `.catch` that treats any
   thrown error (malformed base64url, missing fields, decode failures) the

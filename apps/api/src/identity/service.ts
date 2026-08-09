@@ -4,6 +4,7 @@ import {
   UsernameTakenError,
   createIdentity,
   findActiveSessionByTokenHash,
+  findAmkWrap,
   findIdentityByUsername,
   insertSession,
   revokeSessionByTokenHash,
@@ -114,4 +115,14 @@ export async function validateSession(sessionToken: string): Promise<Authenticat
 
 export async function logout(sessionToken: string): Promise<void> {
   await revokeSessionByTokenHash(hashSessionToken(sessionToken));
+}
+
+/**
+ * Lets an already-authenticated client fetch its own wrapped AMK for a
+ * given factor back out (e.g. after logging in with a password on a new
+ * device, to unwrap the AMK locally) — never decrypted server-side, the
+ * server is just handing back the opaque blob it was given at registration.
+ */
+export async function getAmkWrap(identityId: string, factor: string): Promise<string | null> {
+  return findAmkWrap(identityId, factor);
 }

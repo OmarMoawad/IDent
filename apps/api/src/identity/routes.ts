@@ -5,6 +5,7 @@ import {
   InvalidUsernameError,
   UsernameTakenError,
   WeakPasswordError,
+  getAmkWrap,
   loginWithPassword,
   logout,
   register,
@@ -13,6 +14,7 @@ import {
 
 type RegisterBody = { username?: unknown; password?: unknown; wrappedAmkKey?: unknown };
 type LoginBody = { username?: unknown; password?: unknown };
+type AmkWrapQuery = { factor?: unknown };
 
 export function registerIdentityRoutes(app: FastifyInstance): void {
   app.post<{ Body: RegisterBody }>("/identity/register", async (request, reply) => {
@@ -68,5 +70,20 @@ export function registerIdentityRoutes(app: FastifyInstance): void {
     if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
 
     return reply.code(200).send({ identityId: identity.identityId, username: identity.username });
+  });
+
+  app.get<{ Querystring: AmkWrapQuery }>("/identity/amk-wrap", async (request, reply) => {
+    const token = extractBearerToken(request.headers.authorization);
+    const identity = token ? await validateSession(token) : null;
+    if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
+
+    const factor = typeof request.query.factor === "string" && request.query.factor.length > 0
+      ? request.query.factor
+      : "password";
+
+    const wrappedKey = await getAmkWrap(identity.identityId, factor);
+    if (!wrappedKey) return reply.code(404).send({ error: `No AMK wrap stored for factor "${factor}".` });
+
+    return reply.code(200).send({ factor, wrappedKey });
   });
 }
