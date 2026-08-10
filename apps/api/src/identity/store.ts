@@ -16,7 +16,7 @@ export class UsernameTakenError extends Error {
   }
 }
 
-function isUniqueViolation(err: unknown): boolean {
+export function isUniqueViolation(err: unknown): boolean {
   // drizzle wraps the raw pg error (which carries the SQLSTATE `code`) in a
   // DrizzleQueryError and exposes the original as `.cause` — the code isn't
   // on the wrapper itself.

@@ -155,6 +155,190 @@ describe("WebAuthn passkey registration", () => {
   });
 });
 
+describe("Passwordless registration", () => {
+  it("creates an identity from only a passkey, with no password", async () => {
+    const app = buildApp();
+    const username = uniqueUsername();
+
+    const optionsResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/options",
+      payload: { username },
+    });
+    expect(optionsResponse.statusCode).toBe(200);
+    const options = optionsResponse.json();
+    expect(options.extensions?.prf).toEqual({});
+
+    const authenticator = new SoftwareAuthenticator();
+    const attestation = authenticator.register(options.challenge);
+
+    const verifyResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/verify",
+      payload: { username, response: attestation, wrappedAmkKey: "passwordless-passkey-amk-wrap" },
+    });
+    expect(verifyResponse.statusCode).toBe(201);
+    const result = verifyResponse.json();
+    expect(result.username).toBe(username);
+    expect(typeof result.sessionToken).toBe("string");
+    // A mandatory recovery code — see webauthn-store.ts's
+    // createIdentityWithPasskey comment for why a passwordless identity
+    // can't be created without one.
+    expect(typeof result.recoveryCode).toBe("string");
+    expect(result.recoveryCode.length).toBeGreaterThan(10);
+
+    const meResponse = await app.inject({
+      method: "GET",
+      url: "/identity/me",
+      headers: { authorization: `Bearer ${result.sessionToken}` },
+    });
+    expect(meResponse.statusCode).toBe(200);
+    expect(meResponse.json().username).toBe(username);
+
+    const passkeyWrapResponse = await app.inject({
+      method: "GET",
+      url: `/identity/amk-wrap?factor=passkey&credentialId=${encodeURIComponent(attestation.id)}`,
+      headers: { authorization: `Bearer ${result.sessionToken}` },
+    });
+    expect(passkeyWrapResponse.statusCode).toBe(200);
+    expect(passkeyWrapResponse.json()).toEqual({
+      factor: "passkey",
+      wrappedKey: "passwordless-passkey-amk-wrap",
+    });
+
+    await app.close();
+  });
+
+  it("the returned recovery code can log back in with no passkey or password", async () => {
+    const app = buildApp();
+    const username = uniqueUsername();
+
+    const optionsResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/options",
+      payload: { username },
+    });
+    const options = optionsResponse.json();
+    const authenticator = new SoftwareAuthenticator();
+    const attestation = authenticator.register(options.challenge);
+
+    const verifyResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/verify",
+      payload: { username, response: attestation, wrappedAmkKey: "placeholder" },
+    });
+    const { recoveryCode } = verifyResponse.json();
+
+    const recoveryLoginResponse = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/login",
+      payload: { username, recoveryCode },
+    });
+    expect(recoveryLoginResponse.statusCode).toBe(200);
+    expect(recoveryLoginResponse.json().username).toBe(username);
+
+    await app.close();
+  });
+
+  it("does not claim the username if the passkey ceremony is never verified", async () => {
+    const app = buildApp();
+    const username = uniqueUsername();
+
+    await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/options",
+      payload: { username },
+    });
+    // No verify call — simulates an abandoned ceremony.
+
+    const passwordRegisterResponse = await app.inject({
+      method: "POST",
+      url: "/identity/register",
+      payload: { username, password: "correct horse battery staple", wrappedAmkKey: "blob" },
+    });
+    expect(passwordRegisterResponse.statusCode).toBe(201);
+
+    await app.close();
+  });
+
+  it("rejects a verify for a username whose options were never requested", async () => {
+    const app = buildApp();
+    const authenticator = new SoftwareAuthenticator();
+    const attestation = authenticator.register("not-a-real-challenge-anyone-issued");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/verify",
+      payload: { username: uniqueUsername(), response: attestation, wrappedAmkKey: "blob" },
+    });
+    expect(response.statusCode).toBe(400);
+
+    await app.close();
+  });
+
+  it("rejects replaying the same attestation against a consumed challenge", async () => {
+    const app = buildApp();
+    const username = uniqueUsername();
+
+    const optionsResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/options",
+      payload: { username },
+    });
+    const options = optionsResponse.json();
+    const authenticator = new SoftwareAuthenticator();
+    const attestation = authenticator.register(options.challenge);
+
+    const payload = { username, response: attestation, wrappedAmkKey: "blob" };
+    const first = await app.inject({ method: "POST", url: "/identity/webauthn/register-identity/verify", payload });
+    expect(first.statusCode).toBe(201);
+
+    const replay = await app.inject({ method: "POST", url: "/identity/webauthn/register-identity/verify", payload });
+    expect(replay.statusCode).toBe(400);
+
+    await app.close();
+  });
+
+  it("rejects a taken username at verify time", async () => {
+    const app = buildApp();
+    const username = uniqueUsername();
+    await app.inject({
+      method: "POST",
+      url: "/identity/register",
+      payload: { username, password: "correct horse battery staple", wrappedAmkKey: "blob" },
+    });
+
+    const optionsResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/options",
+      payload: { username },
+    });
+    const options = optionsResponse.json();
+    const authenticator = new SoftwareAuthenticator();
+    const attestation = authenticator.register(options.challenge);
+
+    const verifyResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/verify",
+      payload: { username, response: attestation, wrappedAmkKey: "blob" },
+    });
+    expect(verifyResponse.statusCode).toBe(409);
+
+    await app.close();
+  });
+
+  it("rejects an invalid username at the options step", async () => {
+    const app = buildApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/options",
+      payload: { username: "AB" },
+    });
+    expect(response.statusCode).toBe(400);
+    await app.close();
+  });
+});
+
 async function registerPasskey(app: FastifyInstance, sessionToken: string) {
   const optionsResponse = await app.inject({
     method: "POST",

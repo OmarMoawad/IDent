@@ -46,7 +46,7 @@ export class WeakPasswordError extends Error {
 
 const USERNAME_PATTERN = /^[a-z][a-z0-9_]{2,31}$/;
 
-function assertValidUsername(username: string): void {
+export function assertValidUsername(username: string): void {
   if (!USERNAME_PATTERN.test(username)) {
     throw new InvalidUsernameError(
       "Username must be 3-32 characters, start with a lowercase letter, and contain only lowercase letters, digits, and underscores.",

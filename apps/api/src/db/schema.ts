@@ -155,6 +155,25 @@ export const passkeyAmkWraps = pgTable("passkey_amk_wraps", {
 });
 
 /**
+ * The passwordless-registration equivalent of webauthn_challenges below,
+ * kept as a separate table because it's keyed by username instead of
+ * identity_id — passwordless registration's whole point is that no
+ * identity row exists yet when the ceremony starts (see webauthn-service.ts
+ * getPasswordlessRegistrationOptions/verifyPasswordlessRegistration). The
+ * username is only actually claimed inside the same DB transaction that
+ * verifies the passkey and creates the identity, not here, so an abandoned
+ * ceremony never squats a username.
+ */
+export const passwordlessRegistrationChallenges = pgTable("passwordless_registration_challenges", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  username: text("username").notNull(),
+  challenge: text("challenge").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+});
+
+/**
  * A pending registration or authentication ceremony's server-generated
  * challenge, so the verify step can confirm the signed response answers the
  * exact challenge this server issued (replay/substitution protection).

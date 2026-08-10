@@ -5,47 +5,63 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-10 (session 9 — Phase 0B slice: the recovery-code
-factor, unblocking passwordless registration per session 8's "next tasks"
-note. A server-generated, 20-character (100-bit) recovery code is the
-"its own wrapped copy, its own factor" recovery path ARCHITECTURE.md's
-key-hierarchy note calls for: `POST /identity/recovery/generate`
-(authenticated) mints one, hashes it the same way as a password (reusing
-`identity/password.ts`'s scrypt implementation, which was already generic)
-into a new `recovery_credentials` table (migration
-`0004_medical_bill_hollister.sql`, one row per identity — regenerating
-replaces it, invalidating the old code immediately), and returns the
-plaintext once. `PUT /identity/recovery/wrap` then stores the client's
-AMK wrap for factor "recovery" — reusing `account_master_key_wraps`
-(no new wrap table needed: a recovery code, like a password, is one
-interchangeable secret per identity, unlike per-credential passkeys).
-`POST /identity/recovery/login` mirrors password login exactly, including
-the timing-safe dummy-hash trick against username enumeration. The
-existing `GET /identity/amk-wrap?factor=recovery` route needed zero
-changes — its generic `else` branch already handled any factor besides
-"passkey". apps/web: `/account` gained a "Generate a recovery code" button
-(shows the code once, wraps the AMK with it via the existing
-`amk.ts` PBKDF2/AES-GCM functions if the AMK is loaded, an honest "can't
-unlock yet" message if not — same pattern as the PRF-unsupported
-placeholder); `/login` gained a collapsible recovery-code login form.
-`npm run typecheck`, `npm run test` (40 passing, up from 30), and
-`npm run build` all pass across every workspace; the new migration
-applied clean against a live local Postgres; the full HTTP contract
-(generate → wrap → recovery-login → fetch-wrap, plus wrong-code and
-no-session-token rejections) was re-verified with curl against the live
-dev API. **Not browser-click-through-verified this session** — the
-Chrome browser-automation tool couldn't render `localhost`/`127.0.0.1`
-pages in this environment (external sites worked fine; every local dev
-URL came back "Frame with ID 0 is showing error page" across two tabs and
-both hostnames), unlike sessions 5-8 which all got a real click-through.
-Omar should click through register → generate recovery code → log out →
-log in with the recovery code → confirm the AMK unlocks, the same way he
-verified the PRF work in session 8, before this is considered as solid as
-the rest of Phase 0B. Also added a ROADMAP.md Phase 1 line (at Omar's
-request, mid-session): AI-assisted importance filtering that's
-*negotiated*, not silent — every deprioritized item stays visible, the
-user can override any call or the rule behind it, and the bar is tunable
-per source/contact. See "Next tasks" below for what's still not built.
+Last updated: 2026-08-10 (session 10 — Phase 0B slice: passwordless
+registration, the item session 9's recovery-code factor was built to
+unblock. `POST /identity/webauthn/register-identity/options` +
+`.../verify` create a brand-new identity from nothing but a passkey — no
+password ever exists for these identities. The interesting design problem
+was sequencing: WebAuthn's options step needs *some* stable userID before
+an identity row can exist, and the username can't be claimed until the
+passkey actually verifies (otherwise an abandoned ceremony permanently
+squats a username nobody can ever log into). Solved with a new
+`passwordless_registration_challenges` table keyed by username instead of
+identity_id (migration `0005_aromatic_zzzax.sql`) holding the challenge
+during the ceremony, an opaque random UUID (not the username) as
+WebAuthn's actual userID handle, and a single all-or-nothing transaction
+(`createIdentityWithPasskey` in webauthn-store.ts) that only claims the
+username, inserts the identity, the credential, and its AMK wrap once
+verification succeeds — a duplicate username still surfaces as the same
+409 UsernameTakenError password registration uses, just discovered at
+verify time instead of register time. Per session 9's open design
+question ("should generating a recovery code be mandatory"): yes — this
+was decided in favor of mandatory, because a passwordless identity's only
+factor is a single passkey, so `createIdentityWithPasskey`'s transaction
+also mints a recovery-code hash unconditionally, and `verifyPasswordless
+Registration` returns the plaintext code alongside the new session so
+apps/web can wrap the AMK with it and PUT that wrap in the same flow —
+the user physically cannot finish this registration without seeing a
+recovery code. apps/web's `/register` gained a collapsible "Register with
+just a passkey, no password" form; on success it shows the recovery code
+on its own screen ("save this — there is no password to fall back on")
+before routing to `/account`, not silently in the background. 7 new API
+tests (47 total, up from 40): full create-and-login round trip including
+the mandatory recovery code, that code actually logging back in with zero
+other factors, an abandoned ceremony *not* squatting the username (proven
+by successfully password-registering the same username afterward),
+unknown/replayed/invalid-username challenge rejections, and the
+username-taken 409 at verify time. `npm run typecheck`, `npm run test`,
+and `npm run build` all pass across every workspace; the new migration
+applied clean against a live local Postgres; the options endpoint's
+username validation was re-verified with curl against the live dev API
+(the verify endpoint needs a real WebAuthn attestation, which curl can't
+produce — vitest's software authenticator, hitting these same route
+handlers against the same live Postgres, is what actually exercises that
+half of the contract). **Not browser-click-through-verified**, same as
+session 9 and for the same reason: this environment's Chrome
+browser-automation tool still can't render `localhost`/`127.0.0.1` (retried
+once this session before writing this off as a repeatable environment
+limitation, not a transient blip — external sites render fine). Omar
+should click through "Register with just a passkey" end to end (create →
+see the recovery code screen → continue to /account → log out → log back
+in with the passkey alone, then separately with the recovery code) before
+treating this the way sessions 5-8's manually-verified work is treated.
+
+See "Completed components" and "Architecture decisions" below for session
+9's recovery-code factor, which this session's mandatory-recovery-code
+decision builds directly on. Also from session 9: a ROADMAP.md Phase 1
+line (at Omar's request) for AI-assisted importance filtering that's
+*negotiated* with the user rather than silent. See "Next tasks" below for
+what's still not built.
 
 ## Current phase
 
@@ -69,18 +85,21 @@ secret (unsupported authenticator, or the AMK was locked at registration
 time), apps/web stores and surfaces an honest, distinguishable placeholder
 instead of fabricating ciphertext nothing could unwrap later, generate a
 server-issued recovery code, wrap the AMK with it, log back in using only
-that code if password and passkey are both unavailable, and unwrap the AMK
-with it too. All of this has a real UI in apps/web (`/register`, `/login`,
-`/account`), including the PRF ceremony and the recovery-code flow — the
-PRF work was click-through-verified in a real browser in session 8; this
-session's recovery-code work was not (see header for why) and still needs
-that pass. Password hashes, session tokens, passkey credentials/
-signatures, and all three AMK wrap/unwrap paths (password, passkey/PRF,
-recovery code) are real — none of this is stubbed.
+that code if password and passkey are both unavailable, unwrap the AMK
+with it too, and now also create a brand-new identity from nothing but a
+passkey — no password required, with a recovery code minted automatically
+as a mandatory part of that same flow (see this file's header). All of
+this has a real UI in apps/web (`/register`, `/login`, `/account`),
+including the PRF ceremony, the recovery-code flow, and passwordless
+registration — the PRF work was click-through-verified in a real browser
+in session 8; sessions 9 and 10's work was not (see header for why) and
+still needs that pass. Password hashes, session tokens, passkey
+credentials/signatures, and all three AMK wrap/unwrap paths (password,
+passkey/PRF, recovery code) are real — none of this is stubbed.
 
-Not done: passwordless registration (the recovery-path blocker is now
-resolved — see "Next tasks") and step-up auth for High/Critical tier
-modules.
+Not done: step-up auth for High/Critical tier modules (see "Next tasks") —
+the only item left on the pre-Phase-1 gate an external review set in
+session 8.
 
 ### 0A checklist status
 
@@ -242,6 +261,37 @@ read.
   local Postgres; the full HTTP contract was re-verified with curl against
   the live dev API (see header for why this substituted for a browser
   click-through this session).
+- Passwordless registration: new `passwordless_registration_challenges`
+  table (migration `0005_aromatic_zzzax.sql`), keyed by username rather
+  than identity_id since no identity exists until the ceremony verifies —
+  see this file's header for the full sequencing design (opaque random
+  WebAuthn userID, all-or-nothing `createIdentityWithPasskey` transaction,
+  username claimed only at verify). `POST /identity/webauthn/register-
+  identity/options` + `.../verify` are the two new routes;
+  `verifyPasswordlessRegistration` (webauthn-service.ts) reuses
+  `recovery-code.ts` and `password.ts`'s `hashPassword` exactly the way
+  `generateRecoveryCode` (service.ts) does, so the mandatory recovery-code
+  hash minted here is indistinguishable in the DB from one minted through
+  the authenticated `/identity/recovery/generate` flow — same table, same
+  hashing, same verification path at recovery-login time. apps/web:
+  `/register` gained a collapsible "Register with just a passkey, no
+  password" form that generates the AMK client-side, does the passkey
+  ceremony (real PRF wrap or the honest `prf-unsupported` placeholder,
+  same logic as account/page.tsx's "Register a passkey"), then — before
+  ever calling `setAuth`/navigating — wraps the AMK with the returned
+  recovery code, PUTs that wrap, and shows the code on its own
+  save-it-now screen. 7 new tests (47 total in the API workspace): the
+  full create→login round trip including the mandatory recovery code,
+  that code alone logging back in with zero other factors, an abandoned
+  ceremony not squatting the username (proven by successfully
+  password-registering the same username afterward), unknown/replayed/
+  invalid-username rejections, and the username-taken 409 at verify time.
+  `npm run typecheck`, `npm run test`, and `npm run build` all pass across
+  every workspace; the new migration applied clean against a live local
+  Postgres; the options endpoint's validation was re-verified with curl
+  against the live dev API (verify needs a real WebAuthn attestation,
+  which only vitest's software authenticator can produce against these
+  same route handlers and the same live Postgres — see header).
 
 ## Architecture decisions made in this scaffold
 
@@ -415,6 +465,39 @@ read.
   the server has to generate and return the code first. Same
   opaque-passthrough convention as every other factor once the second call
   happens: the server never sees the unwrapped AMK either way.
+- **Passwordless registration's username is claimed inside the same
+  transaction that verifies the passkey, not at the options step.** The
+  alternative — insert the identity+username first, run the ceremony
+  against that real identity_id, delete it on failure — was rejected
+  because "delete it on failure" has to handle every abandonment path
+  (browser closed, user declines the Touch ID prompt, tab crashes, network
+  drop before verify), and missing even one of those leaves a username
+  permanently squatted by an identity nobody can log into (no password, no
+  verified passkey). A dedicated username-keyed challenge table
+  (`passwordless_registration_challenges`) that nothing else references
+  sidesteps the cleanup problem entirely: if verify never happens, the row
+  just expires and the username was never claimed.
+- **WebAuthn's userID for the options step is an opaque `randomUUID()`,
+  not the username or any value that gets reused later.** The existing
+  identity-bound `getRegistrationOptions` uses `identityId` as userID
+  because that identity already exists; here nothing exists yet, and
+  WebAuthn best practice is that userID shouldn't carry recognizable PII
+  (some authenticators/credential managers persist it). Nothing needs to
+  read this handle back — the real, permanent `identity_id` is minted
+  separately, inside `createIdentityWithPasskey`, once verification
+  succeeds.
+- **A recovery code is mandatory for passwordless registration, not
+  optional the way it is for password/passkey identities.** Session 9 left
+  this as an open question (see its future-gaps entry); resolved here in
+  favor of mandatory because a passwordless identity's *only* other factor
+  is the single passkey just registered — skip the recovery code and
+  losing that one device means the identity is unrecoverable, full stop.
+  `createIdentityWithPasskey`'s transaction mints the hash unconditionally
+  (no code path creates a passwordless identity without one), and apps/web
+  makes it structurally impossible to skip the UI step too: `setAuth`/
+  navigation don't run until after the recovery-code screen is shown and
+  acknowledged, on its own screen rather than folded into a success
+  toast that's easy to miss.
 
 ## Dependency audit (2026-08-08)
 
@@ -526,17 +609,12 @@ block Phase 0B and none should be designed now:
   layered on top (re-enter password/passkey + device-local biometric).
   Not designed yet beyond that one sentence in SECURITY.md. Needed before
   any High/Critical-tier module (Phase 3+) ships a write path.
-- **Passwordless registration** — today a passkey can only be *added* to an
-  identity that already has a password (see the architecture-decision note
-  above). Registering with only a passkey, no password, is a real Phase 0
-  goal (ARCHITECTURE.md's "password remains a fallback" implies passkey can
-  be primary). The recovery-path blocker this was waiting on is now built
-  (session 9's recovery-code factor) — see "Next tasks" for what's left:
-  designing the actual create-identity-with-passkey-only ceremony and
-  deciding whether generating a recovery code should be mandatory (not just
-  offered) during that flow, since a passwordless identity with no recovery
-  code yet would have no way back in at all if the one passkey is lost
-  before one is ever generated.
+- ~~**Passwordless registration**~~ — done as of session 10. A passkey no
+  longer needs a password-holding identity to attach to;
+  `/identity/webauthn/register-identity/{options,verify}` create one from
+  scratch, with a mandatory recovery code minted in the same transaction.
+  See this file's header and "Completed components"/"Architecture
+  decisions" above for the full design.
 - **Recovery code is long-lived, not single-use** — see the
   architecture-decision note above for the reasoning. Worth revisiting if
   real usage shows people never manually regenerate after using one, since
@@ -561,26 +639,28 @@ everything else builds on should be solid before more surface area sits on
 top of it, and "solid" specifically means real passkey-based AMK unlock,
 not just passkey login, plus the recovery-path and step-up items below.
 (Real passkey-based AMK unlock was completed and click-through-verified in
-session 8 — see this file's header. The recovery-path design/build was
-completed in session 9, but not yet browser-click-through-verified — see
-this file's header for why, and do that verification before treating it
-as done the way session 8's PRF work is.)
+session 8 — see this file's header. Recovery-path and passwordless
+registration were completed in sessions 9 and 10 respectively, but
+**neither has been browser-click-through-verified yet** — see this file's
+header for why, and do that verification before treating either as done
+the way session 8's PRF work is. Step-up auth, below, is the one item on
+this gate still entirely unbuilt.)
 
-1. Browser-click-through-verify session 9's recovery-code flow (register →
-   generate a recovery code → log out → log in with only the recovery code
-   → confirm the AMK unlocks) — this environment's browser-automation tool
-   couldn't reach localhost this session, so only curl-against-the-live-API
-   and vitest have verified it so far.
-2. Passwordless registration — see the future-gaps entry above. Now that
-   real passkey UI (PRF-based AMK wrapping, session 8) and a real recovery
-   path (recovery-code factor, session 9) both exist, the remaining work is
-   the create-identity-with-passkey-only ceremony itself, plus deciding
-   whether generating a recovery code should be a mandatory step of that
-   flow rather than a separately offered one (see the future-gaps entry).
-3. Step-up auth / elevated sessions for High/Critical tier modules — see
+1. Browser-click-through-verify sessions 9 and 10's work in one pass, since
+   they're related: register with a password → generate a recovery code →
+   log out → log in with only the recovery code → confirm the AMK unlocks;
+   separately, register with just a passkey (no password) → see the
+   mandatory recovery-code screen → continue to /account → log out → log
+   back in with the passkey alone, then separately with that recovery
+   code. This environment's browser-automation tool can't reach localhost
+   (tried across two sessions now — see header), so only
+   curl-against-the-live-API and vitest have verified this so far.
+2. Step-up auth / elevated sessions for High/Critical tier modules — see
    the future-gaps entry above. Not needed until a Phase 3+ module ships a
    write path, but the base-session/elevated-session split is easier to
-   add before any module depends on "one session tier" than after.
+   add before any module depends on "one session tier" than after. Once
+   this and item 1's click-through are both done, the external review's
+   pre-Phase-1 gate is fully satisfied.
 
 ## Deployment instructions
 

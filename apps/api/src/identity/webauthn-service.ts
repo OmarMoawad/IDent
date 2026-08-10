@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -12,16 +13,21 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/server";
-import { issueSession, type Session } from "./service.js";
+import { hashPassword } from "./password.js";
+import { generateRecoveryCode as generateRecoveryCodeValue, normalizeRecoveryCode } from "./recovery-code.js";
+import { assertValidUsername, issueSession, type Session } from "./service.js";
 import { findIdentityByUsername } from "./store.js";
 import { CHALLENGE_TTL_MS, ORIGIN, RP_ID, RP_NAME, getPrfSaltBase64Url } from "./webauthn-config.js";
 import {
   consumeChallenge,
+  consumePasswordlessRegistrationChallenge,
+  createIdentityWithPasskey,
   findCredentialByCredentialId,
   findCredentialsByIdentity,
   findPasskeyAmkWrap,
   insertChallenge,
   insertCredential,
+  insertPasswordlessRegistrationChallenge,
   updateCredentialCounter,
   upsertPasskeyAmkWrap,
 } from "./webauthn-store.js";
@@ -150,6 +156,95 @@ export async function verifyRegistration(
   });
 
   await upsertPasskeyAmkWrap({ credentialId: inserted.id, identityId, wrappedKey: wrappedAmkKey });
+}
+
+/**
+ * Passwordless-registration counterpart to getRegistrationOptions: no
+ * identity exists yet, so there's no identityId to key the challenge or
+ * excludeCredentials by (a brand-new identity can't already have any
+ * credentials to exclude). See passwordlessRegistrationChallenges' comment
+ * in schema.ts for why this needs its own username-keyed challenge table
+ * rather than reusing webauthn_challenges.
+ */
+export async function getPasswordlessRegistrationOptions(
+  username: string,
+): Promise<PublicKeyCredentialCreationOptionsJSON> {
+  assertValidUsername(username);
+
+  // An opaque random handle, not the username itself — WebAuthn's userID is
+  // meant to avoid carrying PII (some authenticators persist it), and since
+  // no identity row exists yet there's no identity_id to reuse the way
+  // getRegistrationOptions above does. Nothing needs to read this handle
+  // back later: the real, permanent identity_id is minted separately by
+  // createIdentityWithPasskey once verification succeeds.
+  const userHandle = randomUUID();
+  const options = await generateRegistrationOptions({
+    rpName: RP_NAME,
+    rpID: RP_ID,
+    userName: username,
+    userID: new TextEncoder().encode(userHandle),
+    attestationType: "none",
+    excludeCredentials: [],
+    extensions: withPrfExtension({ prf: {} }),
+  });
+
+  await insertPasswordlessRegistrationChallenge({
+    username,
+    challenge: options.challenge,
+    expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS),
+  });
+
+  return options;
+}
+
+/**
+ * Verifies a passwordless registration ceremony and creates the identity —
+ * the username is only actually claimed here, inside
+ * createIdentityWithPasskey's transaction, once the passkey itself has
+ * verified (see that function's comment for why, and why it also mints a
+ * mandatory recovery credential). Returns the recovery code's plaintext
+ * alongside the new session — the caller (apps/web) still has to wrap the
+ * AMK with it and PUT it to /identity/recovery/wrap, same two-step
+ * exchange as the authenticated recovery-code-generation flow, since the
+ * server can't wrap anything with a secret only the client holds.
+ */
+export async function verifyPasswordlessRegistration(
+  username: string,
+  response: RegistrationResponseJSON,
+  wrappedAmkKey: string,
+): Promise<Session & { recoveryCode: string }> {
+  assertValidUsername(username);
+
+  const expectedChallenge = await consumePasswordlessRegistrationChallenge(username);
+  if (!expectedChallenge) throw new ChallengeExpiredError();
+
+  const verification = await verifyRegistrationResponse({
+    response,
+    expectedChallenge,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RP_ID,
+  }).catch(() => ({ verified: false as const }));
+
+  if (!verification.verified || !verification.registrationInfo) {
+    throw new WebauthnVerificationError("Passkey registration could not be verified.");
+  }
+
+  const { credential } = verification.registrationInfo;
+  const recoveryCode = generateRecoveryCodeValue();
+  const recoveryCodeHash = await hashPassword(normalizeRecoveryCode(recoveryCode));
+
+  const { identityId } = await createIdentityWithPasskey({
+    username,
+    credentialId: credential.id,
+    publicKey: Buffer.from(credential.publicKey).toString("base64url"),
+    counter: credential.counter,
+    transports: encodeTransports(credential.transports),
+    wrappedAmkKey,
+    recoveryCodeHash,
+  });
+
+  const session = await issueSession(identityId, username);
+  return { ...session, recoveryCode };
 }
 
 export async function getAuthenticationOptions(username: string): Promise<PublicKeyCredentialRequestOptionsJSON> {
