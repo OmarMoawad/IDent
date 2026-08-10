@@ -75,6 +75,14 @@ isolated deployment (Vault-backed modules are the likely first candidate).
 Don't stand up separate services or datastores prematurely just to match
 this diagram literally.
 
+**Commerce/receipts (Receiptless) is a planned exception, not a future
+module family to fold into this monolith.** It's a distinct product in
+its own repo (`/Users/Omar/receiptless`) with its own trust domain, and
+would integrate as an already-separately-deployed service from day one
+of that integration rather than starting inside Identity Core's monolith
+and being split out later — see ROADMAP.md's "Receiptless" entry for the
+integration contract (not yet built on either side).
+
 ### Integration adapters
 
 One adapter per external system (Slack, Notion, a given bank aggregator,
@@ -262,3 +270,13 @@ cryptographic identity, or (once Phase 10 exists) a telecom subscriber
 identifier. Renaming a username updates one row in Identity Core's alias
 table, nothing downstream. Phone/email remain optional, revocable recovery
 contacts only.
+
+The one public `@username` above is meant to be *recognizable* — it isn't
+meant to also be the identifier every external party (a merchant, a
+carrier, eventually a hospital) receives, since one shared identifier
+handed to everyone makes cross-party correlation trivial. A
+scoped/pseudonymous per-relationship identifier scheme (distinct from
+`@username`, resolved back to `identity_id` only by Identity Core itself)
+is a real, not-yet-designed gap — see IDent_STATE.md's future
+architecture gaps log. Receiptless's merchant-facing checkout flow (see
+ROADMAP.md) is the first concrete driver for it, not a hypothetical.

@@ -87,6 +87,68 @@ replace" model before adding anything sensitive.
 **Exit criteria:** daily-driver usable as a notification/inbox aggregator,
 with a working, honestly-described private-assistant upsell.
 
+## Receiptless — Commerce & Receipts (separate repo, early integration target)
+
+Not a numbered phase, deliberately: unlike Phases 1–10, this isn't an
+IDent-authored dependency chain — it's an independently-developed product
+(`/Users/Omar/receiptless`, `github.com/OmarMoawad/receiptless`, own
+README/ROADMAP.md) that this roadmap only documents the *integration
+contract* for, not the build plan. Sequenced in the doc right after Phase
+1 because that's roughly where it belongs on the trust-tier scale — not
+because it's IDent-built work item #2.
+
+**What it is:** an interoperable digital receipt/purchase layer — a
+purchase generates a structured receipt that reaches a private vault via
+QR claim-token, photo, email, or (later) merchant API/POS/NFC, and stays
+permanently searchable (warranties, return windows, spend intelligence).
+See its own ROADMAP.md for the full plan (it's substantial and shouldn't
+be duplicated here).
+
+**Why it's called out here despite being a separate repo:** purchase/
+receipt data is a *materially* lower trust tier than Phase 5's banking
+data — Receiptless's own positioning is explicit that it answers "what
+did I buy," never "how did I pay," and has no plan to become a payment
+processor. That means it doesn't need to wait behind Phase 5's
+licensed-aggregator machinery the way real financial data does. It also
+solves a real problem for IDent specifically: an identity platform has a
+chicken-and-egg adoption problem ("why would anyone create a new
+identity?") that abstract infrastructure can't answer on its own. "Every
+receipt, warranty, and return automatically follows you" is a concrete,
+ordinary consumer reason a communications hub alone doesn't provide —
+this is a candidate for IDent's first real adoption driver, not just
+another module.
+
+**Integration shape (not built on either side yet — both repos are
+independently useful and stay that way until this is real):**
+- **IDent is the identity authority, Receiptless is the commerce
+  layer.** Receiptless would store an `ownerSubjectId` referencing
+  IDent's `identity_id` (see ARCHITECTURE.md's Data model note), not a
+  duplicated user/auth table — matching this doc's existing "don't
+  rebuild every subsystem inside Identity Core" principle.
+- **Repos stay separate. No monorepo merge.** Integration happens through
+  explicit HTTP contracts (identity resolution, consent checks, credential
+  issuance) — the same "own datastore, no shared tables across modules"
+  rule ARCHITECTURE.md's Domain services section already applies to
+  IDent's own modules extends naturally to an external one.
+  Receiptless already qualifies as a separately-deployed service under
+  that section's Phase 0–2 modular-monolith carve-out, since it's a
+  distinct trust domain by construction, not a shortcut being taken.
+- **Never one universal public identifier handed to every merchant.**
+  Today's Data model note only covers the single public `@username`;
+  merchant-facing purchase flows need their own scoped, pseudonymous
+  identifier per relationship so a supermarket, a carrier, and a hospital
+  can't trivially correlate the same person across each other. This is a
+  real gap, not designed yet — logged in IDent_STATE.md's future
+  architecture gaps rather than half-designed here.
+- **Prerequisite on both sides, not built yet:** Receiptless needs its own
+  Phase 1 (multi-user accounts — today it's one shared vault, no auth);
+  IDent needs a consent/scoped-alias system beyond today's single public
+  username. Neither blocks the other's current, independent progress.
+- **Branding stays separate** ("Receiptless", possibly "Receiptless — by
+  IDent" once integrated) rather than being absorbed into the IDent name —
+  same reasoning as Google keeping Gmail/Drive/Maps as named products
+  under one umbrella instead of renaming everything "Google."
+
 ## Phase 2 — Productivity & Real-Time Comms
 
 - Slack and Notion integrations

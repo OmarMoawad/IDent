@@ -63,6 +63,26 @@ line (at Omar's request) for AI-assisted importance filtering that's
 *negotiated* with the user rather than silent. See "Next tasks" below for
 what's still not built.
 
+**Also this session, before browser verification (documentation only, no
+code):** captured Omar's decision on merging Receiptless
+(`/Users/Omar/receiptless`, a separate, real, actively-developed digital-
+receipt project — previously untracked in this repo's memory) into the
+IDent ecosystem. Decision: loosely-coupled integration, not a repo/
+codebase merge — Receiptless keeps its own repo, its own roadmap, and
+likely its own brand ("Receiptless — by IDent"); IDent becomes its
+identity authority via `ownerSubjectId` → `identity_id`, resolved through
+a new scoped/pseudonymous per-relationship identifier (not today's single
+`@username`) rather than one correlatable ID handed to every merchant.
+Written up as a new "Receiptless" entry in ROADMAP.md (positioned right
+after Phase 1, deliberately not given a phase number — it's an external
+product, not an IDent-authored dependency), a pointer in ARCHITECTURE.md's
+Domain services and Data model note sections, and two new entries in this
+file's future architecture gaps log below (the scoped-alias design itself,
+and the Receiptless integration's two real prerequisites — Receiptless's
+own multi-user auth and IDent's scoped-alias system — neither of which
+exists yet on either side). Nothing to build from this yet; it's
+documented intent, not a task.
+
 ## Current phase
 
 **Phase 0B — Identity Core** (ROADMAP.md Phase 0), in progress. Phase 0A
@@ -582,6 +602,27 @@ by this gate.
 Logged so a future session doesn't have to rediscover these; none of them
 block Phase 0B and none should be designed now:
 
+- **Scoped/pseudonymous per-relationship identifiers** (Receiptless
+  integration, and any future merchant/carrier/institution-facing flow) —
+  today's Data model note (ARCHITECTURE.md) has exactly one public,
+  correlatable identifier (`@username`) besides the opaque internal
+  `identity_id`. Handing that same `@username` to every external party
+  defeats the point once there are enough of them to cross-reference (a
+  supermarket and a carrier shouldn't be able to trivially confirm they
+  share a customer). Needs a real design: how a scoped alias is minted per
+  relationship, how it's resolved back to `identity_id` (Identity Core
+  only, never the counterparty), and its lifecycle (revocable? one per
+  merchant forever, or rotatable?). Not designed yet — first concrete
+  driver is Receiptless's merchant-facing checkout (see ROADMAP.md's
+  "Receiptless" entry), so revisit when that integration actually starts,
+  not before.
+- **Receiptless integration itself** — see ROADMAP.md's "Receiptless"
+  entry for the full shape (separate repo stays separate, `ownerSubjectId`
+  pattern, no monorepo merge). Two real prerequisites block it that
+  neither repo has yet: Receiptless's own multi-user auth (its Phase 1 —
+  today it's one shared vault, no accounts) and IDent's scoped-alias
+  system (the gap directly above). Purely a documented future intent as
+  of 2026-08-10 — nothing to build from this entry yet.
 - **Telecom identity/routing plane** (Phase 10) — ARCHITECTURE.md's
   Integration Adapters only lists carrier APIs as a generic example.
   Needs its own section (`identity_id` → `@username` → communications
