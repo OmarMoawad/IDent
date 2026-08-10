@@ -13,8 +13,12 @@ export function buildApp(): FastifyInstance {
   // ORIGIN) — apps/web talks to this API cross-origin in dev (3000 -> 4000),
   // and there's no cookie/session state for CORS to protect beyond the
   // bearer token the client sends explicitly, so a single allowed origin is
-  // enough for now.
-  app.register(cors, { origin: [ORIGIN] });
+  // enough for now. methods must be listed explicitly: @fastify/cors
+  // defaults to GET/HEAD/POST only, which silently blocked the browser's
+  // preflight for PUT /identity/recovery/wrap (curl and vitest's
+  // app.inject() both bypass CORS entirely, so neither caught this — only
+  // a real browser's preflight does).
+  app.register(cors, { origin: [ORIGIN], methods: ["GET", "HEAD", "POST", "PUT"] });
 
   app.get("/health", async (): Promise<HealthStatus> => {
     const db = await checkDbHealth();

@@ -337,6 +337,82 @@ describe("Passwordless registration", () => {
     expect(response.statusCode).toBe(400);
     await app.close();
   });
+
+  it("can log back in via passkey, not just the recovery code", async () => {
+    // Regression test: findIdentityByUsername (store.ts) used to inner-join
+    // password_credentials, so it silently returned null for any
+    // passwordless identity — meaning passkey login (which resolves the
+    // username through that same function) failed with "no account with
+    // that username" even though the identity, username, and credential
+    // all existed. Found via manual browser testing, not by this suite
+    // originally, because every other passkey-login test registers a
+    // password identity first and adds a passkey second. See store.ts's
+    // findIdentityByUsername comment for the fix (left join).
+    const app = buildApp();
+    const username = uniqueUsername();
+
+    const optionsResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/options",
+      payload: { username },
+    });
+    const options = optionsResponse.json();
+    const authenticator = new SoftwareAuthenticator();
+    const attestation = authenticator.register(options.challenge);
+
+    await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/verify",
+      payload: { username, response: attestation, wrappedAmkKey: "blob" },
+    });
+
+    const loginOptionsResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/login/options",
+      payload: { username },
+    });
+    expect(loginOptionsResponse.statusCode).toBe(200);
+    const loginOptions = loginOptionsResponse.json();
+
+    const assertion = authenticator.authenticate(loginOptions.challenge);
+    const loginVerifyResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/login/verify",
+      payload: { username, response: assertion },
+    });
+    expect(loginVerifyResponse.statusCode).toBe(200);
+    expect(loginVerifyResponse.json().username).toBe(username);
+
+    await app.close();
+  });
+
+  it("rejects a password-login attempt against a passwordless identity instead of crashing", async () => {
+    const app = buildApp();
+    const username = uniqueUsername();
+
+    const optionsResponse = await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/options",
+      payload: { username },
+    });
+    const options = optionsResponse.json();
+    const authenticator = new SoftwareAuthenticator();
+    const attestation = authenticator.register(options.challenge);
+    await app.inject({
+      method: "POST",
+      url: "/identity/webauthn/register-identity/verify",
+      payload: { username, response: attestation, wrappedAmkKey: "blob" },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/login",
+      payload: { username, password: "irrelevant-this-identity-has-none" },
+    });
+    expect(response.statusCode).toBe(401);
+
+    await app.close();
+  });
 });
 
 async function registerPasskey(app: FastifyInstance, sessionToken: string) {

@@ -60,9 +60,24 @@ export async function createIdentity(input: NewIdentity): Promise<{ identityId: 
 export type IdentityByUsername = {
   identityId: string;
   username: string;
-  passwordHash: string;
+  passwordHash: string | null;
 };
 
+/**
+ * Used for both password login (service.ts's loginWithPassword) and to
+ * resolve a username before a passkey login ceremony (webauthn-service.ts's
+ * getAuthenticationOptions/verifyAuthentication) — those two callers need
+ * identityId/username, not passwordHash. This must be a LEFT JOIN on
+ * password_credentials, not an inner join: a passwordless identity (see
+ * webauthn-store.ts's createIdentityWithPasskey) has no row there at all,
+ * and an inner join would silently exclude it from every lookup —
+ * including passkey login, which is that identity's *only* way to log in.
+ * (Found via manual browser testing: passkey login for a
+ * passwordless-registered identity failed with "no account with that
+ * username" even though the identity, username, and credential all
+ * existed — vitest never caught it because every existing passkey-login
+ * test registers a password identity first.)
+ */
 export async function findIdentityByUsername(username: string): Promise<IdentityByUsername | null> {
   const rows = await db
     .select({
@@ -72,7 +87,7 @@ export async function findIdentityByUsername(username: string): Promise<Identity
     })
     .from(usernameAliases)
     .innerJoin(identities, eq(identities.id, usernameAliases.identityId))
-    .innerJoin(passwordCredentials, eq(passwordCredentials.identityId, identities.id))
+    .leftJoin(passwordCredentials, eq(passwordCredentials.identityId, identities.id))
     .where(eq(usernameAliases.username, username))
     .limit(1);
   return rows[0] ?? null;

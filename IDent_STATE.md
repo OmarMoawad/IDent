@@ -5,66 +5,71 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-10 (session 10 — Phase 0B slice: passwordless
-registration, the item session 9's recovery-code factor was built to
-unblock. `POST /identity/webauthn/register-identity/options` +
-`.../verify` create a brand-new identity from nothing but a passkey — no
-password ever exists for these identities. The interesting design problem
-was sequencing: WebAuthn's options step needs *some* stable userID before
-an identity row can exist, and the username can't be claimed until the
-passkey actually verifies (otherwise an abandoned ceremony permanently
-squats a username nobody can ever log into). Solved with a new
-`passwordless_registration_challenges` table keyed by username instead of
-identity_id (migration `0005_aromatic_zzzax.sql`) holding the challenge
-during the ceremony, an opaque random UUID (not the username) as
-WebAuthn's actual userID handle, and a single all-or-nothing transaction
-(`createIdentityWithPasskey` in webauthn-store.ts) that only claims the
-username, inserts the identity, the credential, and its AMK wrap once
-verification succeeds — a duplicate username still surfaces as the same
-409 UsernameTakenError password registration uses, just discovered at
-verify time instead of register time. Per session 9's open design
-question ("should generating a recovery code be mandatory"): yes — this
-was decided in favor of mandatory, because a passwordless identity's only
-factor is a single passkey, so `createIdentityWithPasskey`'s transaction
-also mints a recovery-code hash unconditionally, and `verifyPasswordless
-Registration` returns the plaintext code alongside the new session so
-apps/web can wrap the AMK with it and PUT that wrap in the same flow —
-the user physically cannot finish this registration without seeing a
-recovery code. apps/web's `/register` gained a collapsible "Register with
-just a passkey, no password" form; on success it shows the recovery code
-on its own screen ("save this — there is no password to fall back on")
-before routing to `/account`, not silently in the background. 7 new API
-tests (47 total, up from 40): full create-and-login round trip including
-the mandatory recovery code, that code actually logging back in with zero
-other factors, an abandoned ceremony *not* squatting the username (proven
-by successfully password-registering the same username afterward),
-unknown/replayed/invalid-username challenge rejections, and the
-username-taken 409 at verify time. `npm run typecheck`, `npm run test`,
-and `npm run build` all pass across every workspace; the new migration
-applied clean against a live local Postgres; the options endpoint's
-username validation was re-verified with curl against the live dev API
-(the verify endpoint needs a real WebAuthn attestation, which curl can't
-produce — vitest's software authenticator, hitting these same route
-handlers against the same live Postgres, is what actually exercises that
-half of the contract). **Not browser-click-through-verified**, same as
-session 9 and for the same reason: this environment's Chrome
-browser-automation tool still can't render `localhost`/`127.0.0.1` (retried
-once this session before writing this off as a repeatable environment
-limitation, not a transient blip — external sites render fine). Omar
-should click through "Register with just a passkey" end to end (create →
-see the recovery code screen → continue to /account → log out → log back
-in with the passkey alone, then separately with the recovery code) before
-treating this the way sessions 5-8's manually-verified work is treated.
+Last updated: 2026-08-11 (session 11 — real browser click-through
+verification of sessions 9 and 10's work, done by Omar himself, guided
+step by step. This is the pass both of those sessions flagged as
+outstanding (their Chrome browser-automation tool couldn't reach
+`localhost` in that environment). It surfaced **two real bugs neither
+vitest nor curl-against-the-live-API had caught**, both now fixed and
+covered by regression tests:
 
-See "Completed components" and "Architecture decisions" below for session
-9's recovery-code factor, which this session's mandatory-recovery-code
-decision builds directly on. Also from session 9: a ROADMAP.md Phase 1
-line (at Omar's request) for AI-assisted importance filtering that's
-*negotiated* with the user rather than silent. See "Next tasks" below for
-what's still not built.
+1. **`PUT /identity/recovery/wrap` was silently unreachable from the
+   browser.** `app.ts`'s CORS registration (`app.register(cors, { origin:
+   [ORIGIN] })`) never listed `methods`, and `@fastify/cors` defaults to
+   `GET,HEAD,POST` only — so the browser's preflight `OPTIONS` for `PUT`
+   got back an `access-control-allow-methods` header that didn't include
+   `PUT`, and the browser correctly refused to send the real request. The
+   fetch failed with a generic network-level error (not an HTTP response),
+   which apps/web's `request()` doesn't recognize as an `ApiError`, so it
+   surfaced as the generic "Could not generate a recovery code." message —
+   accurate as far as it went, but not diagnostic. Neither `curl` (no CORS
+   enforcement at all) nor vitest's `app.inject()` (bypasses the HTTP/CORS
+   layer entirely) can ever catch this class of bug — only a real browser
+   preflight does. Fixed: `methods: ["GET", "HEAD", "POST", "PUT"]` added
+   explicitly in `app.ts`.
+2. **Passkey login was completely broken for passwordless identities.**
+   `store.ts`'s `findIdentityByUsername` — shared by password login *and*
+   both passkey-login steps (`getAuthenticationOptions`/
+   `verifyAuthentication` in webauthn-service.ts) — did an `INNER JOIN` on
+   `password_credentials`. A passwordless identity (session 10) has no row
+   there at all, so the join silently excluded it from every lookup,
+   including passkey login — its *only* login path. Surfaced as "No
+   account with that username" for a username that definitely existed.
+   Every existing passkey-login test registered a password identity first
+   and added a passkey second, so this never got exercised against a
+   passwordless-only identity until a real click-through tried it. Fixed:
+   `leftJoin` instead of `innerJoin`, `passwordHash` now typed
+   `string | null`; `loginWithPassword`'s existing `?? getDummyHash()`
+   fallback already handled a null hash correctly with zero code changes
+   needed there — a passwordless identity now correctly 401s on a password
+   login attempt via the same timing-safe dummy-hash path, instead of
+   crashing or misbehaving.
 
-**Also this session, before browser verification (documentation only, no
-code):** captured Omar's decision on merging Receiptless
+2 new regression tests added (49 total, up from 47): passkey login
+succeeding for a passwordless-registered identity, and a password-login
+attempt against one correctly rejecting instead of crashing. `npm run
+typecheck`, `npm run test`, and `npm run build` all pass across every
+workspace. **Both the recovery-code factor (session 9) and passwordless
+registration (session 10) are now genuinely browser-click-through-verified
+end to end**, all 9 steps: password register → generate recovery code →
+log out → log in with only the recovery code (AMK unlocks) → passwordless
+register (mandatory recovery-code screen shown, not skippable) → log out →
+log in with the passkey alone → log out → log in with that identity's
+recovery code alone (AMK unlocks). This closes the one item sessions 9 and
+10 both left open — see "Next tasks" below, which now only has step-up
+auth remaining before the external review's pre-Phase-1 gate is fully
+satisfied.
+
+See "Completed components" and "Architecture decisions" below for the full
+session 9 (recovery-code factor) and session 10 (passwordless
+registration) writeups — unchanged by this session except for the two
+fixes above. Also from session 9: a ROADMAP.md Phase 1 line (at Omar's
+request) for AI-assisted importance filtering that's *negotiated* with the
+user rather than silent.
+
+**Also from session 10, before this session's browser verification
+(documentation only, no code):** captured Omar's decision on merging
+Receiptless
 (`/Users/Omar/receiptless`, a separate, real, actively-developed digital-
 receipt project — previously untracked in this repo's memory) into the
 IDent ecosystem. Decision: loosely-coupled integration, not a repo/
@@ -111,11 +116,13 @@ passkey — no password required, with a recovery code minted automatically
 as a mandatory part of that same flow (see this file's header). All of
 this has a real UI in apps/web (`/register`, `/login`, `/account`),
 including the PRF ceremony, the recovery-code flow, and passwordless
-registration — the PRF work was click-through-verified in a real browser
-in session 8; sessions 9 and 10's work was not (see header for why) and
-still needs that pass. Password hashes, session tokens, passkey
-credentials/signatures, and all three AMK wrap/unwrap paths (password,
-passkey/PRF, recovery code) are real — none of this is stubbed.
+registration — the PRF work was click-through-verified in session 8, and
+the recovery-code and passwordless-registration flows were verified in
+session 11 (which also found and fixed two real bugs neither flow's
+automated tests had caught — see this file's header). Password hashes,
+session tokens, passkey credentials/signatures, and all three AMK
+wrap/unwrap paths (password, passkey/PRF, recovery code) are real — none
+of this is stubbed.
 
 Not done: step-up auth for High/Critical tier modules (see "Next tasks") —
 the only item left on the pre-Phase-1 gate an external review set in
@@ -312,6 +319,33 @@ read.
   against the live dev API (verify needs a real WebAuthn attestation,
   which only vitest's software authenticator can produce against these
   same route handlers and the same live Postgres — see header).
+- Session 11 bug fixes (found via the manual browser click-through
+  sessions 9/10 had been waiting on — see header for full detail): (1)
+  `app.ts`'s CORS registration now explicitly lists
+  `methods: ["GET", "HEAD", "POST", "PUT"]` — `@fastify/cors`'s
+  unconfigured default (`GET,HEAD,POST`) was silently blocking the
+  browser's preflight for `PUT /identity/recovery/wrap`, invisible to both
+  curl (no CORS enforcement) and vitest's `app.inject()` (bypasses HTTP
+  entirely). (2) `store.ts`'s `findIdentityByUsername` now `leftJoin`s
+  `password_credentials` instead of `innerJoin`ing it, with `passwordHash`
+  typed `string | null` — the inner join had silently excluded every
+  passwordless identity from both passkey-login steps
+  (`getAuthenticationOptions`/`verifyAuthentication` in
+  webauthn-service.ts, which resolve the username through this same
+  function), so passkey login — the *only* login path for a passwordless
+  identity — was completely broken for exactly the identities session 10
+  introduced. `loginWithPassword`'s existing `record?.passwordHash ??
+  getDummyHash()` fallback already handled a null hash correctly with zero
+  changes needed. 2 new regression tests (49 total): passkey login
+  succeeding for a passwordless-registered identity, and a password-login
+  attempt against one correctly 401ing instead of crashing.
+  `npm run typecheck`, `npm run test`, and `npm run build` all pass across
+  every workspace. **Both fixes were confirmed live in the browser by
+  Omar** (not just re-run against vitest) — he retried the exact failing
+  step after each fix and it succeeded — and all 9 steps of both flows
+  (recovery-code factor and passwordless registration) are now genuinely
+  browser-click-through-verified end to end, closing the gap sessions 9
+  and 10 both left open.
 
 ## Architecture decisions made in this scaffold
 
@@ -680,28 +714,18 @@ everything else builds on should be solid before more surface area sits on
 top of it, and "solid" specifically means real passkey-based AMK unlock,
 not just passkey login, plus the recovery-path and step-up items below.
 (Real passkey-based AMK unlock was completed and click-through-verified in
-session 8 — see this file's header. Recovery-path and passwordless
-registration were completed in sessions 9 and 10 respectively, but
-**neither has been browser-click-through-verified yet** — see this file's
-header for why, and do that verification before treating either as done
-the way session 8's PRF work is. Step-up auth, below, is the one item on
-this gate still entirely unbuilt.)
+session 8. Recovery-path and passwordless registration were completed in
+sessions 9 and 10 and **click-through-verified in session 11** — which
+also found and fixed two real bugs the verification pass exists to catch
+(see this file's header). Step-up auth, below, is now the only item left
+on this gate.)
 
-1. Browser-click-through-verify sessions 9 and 10's work in one pass, since
-   they're related: register with a password → generate a recovery code →
-   log out → log in with only the recovery code → confirm the AMK unlocks;
-   separately, register with just a passkey (no password) → see the
-   mandatory recovery-code screen → continue to /account → log out → log
-   back in with the passkey alone, then separately with that recovery
-   code. This environment's browser-automation tool can't reach localhost
-   (tried across two sessions now — see header), so only
-   curl-against-the-live-API and vitest have verified this so far.
-2. Step-up auth / elevated sessions for High/Critical tier modules — see
+1. Step-up auth / elevated sessions for High/Critical tier modules — see
    the future-gaps entry above. Not needed until a Phase 3+ module ships a
    write path, but the base-session/elevated-session split is easier to
    add before any module depends on "one session tier" than after. Once
-   this and item 1's click-through are both done, the external review's
-   pre-Phase-1 gate is fully satisfied.
+   this is done, the external review's pre-Phase-1 gate is fully satisfied
+   and Phase 1 can start.
 
 ## Deployment instructions
 
