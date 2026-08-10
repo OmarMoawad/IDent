@@ -720,12 +720,51 @@ also found and fixed two real bugs the verification pass exists to catch
 (see this file's header). Step-up auth, below, is now the only item left
 on this gate.)
 
-1. Step-up auth / elevated sessions for High/Critical tier modules — see
-   the future-gaps entry above. Not needed until a Phase 3+ module ships a
-   write path, but the base-session/elevated-session split is easier to
-   add before any module depends on "one session tier" than after. Once
-   this is done, the external review's pre-Phase-1 gate is fully satisfied
-   and Phase 1 can start.
+1. **Step-up auth / elevated sessions for High/Critical tier modules —
+   confirmed 2026-08-11 as the next session's starting task**, per a
+   second external review of this repo (2026-08-11) that read the actual
+   source (not just this file) and independently confirmed session 11's
+   fixes and the 49-passing-tests/green-CI claims. Not needed until a
+   Phase 3+ module ships a write path, but the base-session/elevated-
+   session split is easier to add before any module depends on "one
+   session tier" than after. Once this is done, the external review's
+   pre-Phase-1 gate is fully satisfied and Phase 1 can start.
+
+   `SECURITY.md`'s current spec is one sentence ("re-enter password/
+   passkey + device-local biometric... expires on a much shorter window
+   than the base session"). The 2026-08-11 review sharpened this into a
+   concrete requirement list to build against — device-local biometric is
+   correctly *not* on it, since that depends on Phase 3 enrollment, which
+   doesn't exist yet:
+   - a distinct elevated-session state layered on top of the existing base
+     session, not a new session type that replaces it
+   - explicit elevation expiry, shorter than the base session's 24h TTL
+   - elevation obtained by re-entering an existing factor (password,
+     passkey, or recovery code) — reuses session.ts's existing verify
+     paths, doesn't invent a new one
+   - no client-controlled trust-tier claims — the server decides whether a
+     request needs elevation and whether the presented session has it,
+     never a client-supplied flag
+   - server-side enforcement at the route/middleware level, not a
+     per-handler opt-in that's easy to forget
+   - replay-resistant elevation (an elevation proof shouldn't itself be
+     stealable and reusable past its expiry)
+   - tests proving a normal (non-elevated) session is rejected from a
+     High/Critical-tier route
+   - tests proving an *expired* elevated session is rejected, not silently
+     treated as still-elevated
+   - real-browser click-through verification, per session 11's standard —
+     not just vitest
+
+   **Open design question to resolve at the start of that session, before
+   writing code:** no High/Critical-tier module exists yet (those are
+   Phase 3+), so "a route that requires elevation" has no real consumer to
+   test against. Two options: (a) build the elevation primitive/middleware
+   fully unit-tested in isolation, with no route using it yet, or (b) add
+   one synthetic demo-only protected route purely to prove the mechanism
+   end-to-end (including the browser click-through, which needs something
+   real to click). Decide which before implementing — don't improvise it
+   mid-session.
 
 ## Deployment instructions
 
