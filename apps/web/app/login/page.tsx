@@ -9,6 +9,7 @@ import { unwrapAmk } from "../../lib/amk";
 import { ApiError, apiGet, apiPost } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
 import { decodePrfEvalExtensions, prfOutputFromAssertion, unwrapAmkWithPrfOutput } from "../../lib/prf";
+import { normalizeRecoveryCode } from "../../lib/recovery-code";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,6 +19,11 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [passkeySubmitting, setPasskeySubmitting] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryUsername, setRecoveryUsername] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoverySubmitting, setRecoverySubmitting] = useState(false);
 
   async function handlePasswordSubmit(event: FormEvent) {
     event.preventDefault();
@@ -107,6 +113,40 @@ export default function LoginPage() {
     }
   }
 
+  async function handleRecoverySubmit(event: FormEvent) {
+    event.preventDefault();
+    setRecoveryError(null);
+    setRecoverySubmitting(true);
+    try {
+      const session = await apiPost<IdentitySession>("/identity/recovery/login", {
+        username: recoveryUsername,
+        recoveryCode,
+      });
+
+      let amk: Uint8Array | null = null;
+      try {
+        const wrap = await apiGet<{ wrappedKey: string }>(
+          "/identity/amk-wrap?factor=recovery",
+          session.sessionToken,
+        );
+        amk = await unwrapAmk(wrap.wrappedKey, normalizeRecoveryCode(recoveryCode));
+      } catch (amkError) {
+        // Same tradeoff as password login: getting in shouldn't block on the
+        // vault key unwrapping (e.g. this code was generated before the AMK
+        // was ever loaded — see account/page.tsx's generate-recovery-code
+        // status messages).
+        console.warn("Could not unwrap AMK via recovery code after login:", amkError);
+      }
+
+      setAuth({ identityId: session.identityId, username: session.username, sessionToken: session.sessionToken, amk });
+      router.push("/account");
+    } catch (err) {
+      setRecoveryError(err instanceof ApiError ? err.message : "Something went wrong.");
+    } finally {
+      setRecoverySubmitting(false);
+    }
+  }
+
   return (
     <main>
       <h1>Log in</h1>
@@ -138,6 +178,36 @@ export default function LoginPage() {
       <button type="button" onClick={handlePasskeyLogin} disabled={passkeySubmitting}>
         {passkeySubmitting ? "Waiting for passkey…" : "Log in with a passkey"}
       </button>
+      <button type="button" onClick={() => setShowRecovery((value) => !value)}>
+        {showRecovery ? "Hide recovery code login" : "Lost your password and passkey? Use a recovery code"}
+      </button>
+      {showRecovery && (
+        <form onSubmit={handleRecoverySubmit}>
+          <label>
+            Username
+            <input
+              value={recoveryUsername}
+              onChange={(event) => setRecoveryUsername(event.target.value)}
+              required
+              autoComplete="username"
+            />
+          </label>
+          <label>
+            Recovery code
+            <input
+              value={recoveryCode}
+              onChange={(event) => setRecoveryCode(event.target.value)}
+              required
+              autoComplete="off"
+              placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
+            />
+          </label>
+          {recoveryError && <p role="alert">{recoveryError}</p>}
+          <button type="submit" disabled={recoverySubmitting}>
+            {recoverySubmitting ? "Logging in…" : "Log in with recovery code"}
+          </button>
+        </form>
+      )}
       <p>
         Need an account? <a href="/register">Register</a>
       </p>

@@ -2,19 +2,25 @@ import type { FastifyInstance } from "fastify";
 import { extractBearerToken, requireStrings } from "./http.js";
 import {
   InvalidCredentialsError,
+  InvalidRecoveryCodeError,
   InvalidUsernameError,
   UsernameTakenError,
   WeakPasswordError,
+  generateRecoveryCode,
   getAmkWrap,
   loginWithPassword,
+  loginWithRecoveryCode,
   logout,
   register,
+  setRecoveryAmkWrap,
   validateSession,
 } from "./service.js";
 import { getPasskeyAmkWrap } from "./webauthn-service.js";
 
 type RegisterBody = { username?: unknown; password?: unknown; wrappedAmkKey?: unknown };
 type LoginBody = { username?: unknown; password?: unknown };
+type RecoveryLoginBody = { username?: unknown; recoveryCode?: unknown };
+type RecoveryWrapBody = { wrappedAmkKey?: unknown };
 type AmkWrapQuery = { factor?: unknown; credentialId?: unknown };
 
 export function registerIdentityRoutes(app: FastifyInstance): void {
@@ -55,6 +61,46 @@ export function registerIdentityRoutes(app: FastifyInstance): void {
       }
       throw err;
     }
+  });
+
+  app.post<{ Body: RecoveryLoginBody }>("/identity/recovery/login", async (request, reply) => {
+    const fields = requireStrings(request.body ?? {}, ["username", "recoveryCode"]);
+    if (!fields) {
+      return reply.code(400).send({ error: "username and recoveryCode are required." });
+    }
+    const [username, recoveryCode] = fields;
+
+    try {
+      const session = await loginWithRecoveryCode({ username, recoveryCode });
+      return reply.code(200).send(session);
+    } catch (err) {
+      if (err instanceof InvalidRecoveryCodeError) {
+        return reply.code(401).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/identity/recovery/generate", async (request, reply) => {
+    const token = extractBearerToken(request.headers.authorization);
+    const identity = token ? await validateSession(token) : null;
+    if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
+
+    const recoveryCode = await generateRecoveryCode(identity.identityId);
+    return reply.code(201).send({ recoveryCode });
+  });
+
+  app.put<{ Body: RecoveryWrapBody }>("/identity/recovery/wrap", async (request, reply) => {
+    const token = extractBearerToken(request.headers.authorization);
+    const identity = token ? await validateSession(token) : null;
+    if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
+
+    const fields = requireStrings(request.body ?? {}, ["wrappedAmkKey"]);
+    if (!fields) return reply.code(400).send({ error: "wrappedAmkKey is required." });
+    const [wrappedAmkKey] = fields;
+
+    await setRecoveryAmkWrap(identity.identityId, wrappedAmkKey);
+    return reply.code(204).send();
   });
 
   app.post("/identity/logout", async (request, reply) => {

@@ -74,6 +74,15 @@ replace" model before adding anything sensitive.
 - Calendar + reminders (**free**)
 - Basic AI assistant: read-only Q&A over the user's own inbox/calendar/
   contacts (**paid** — the monetization wedge, see BOOTSTRAP.md)
+- AI-assisted importance filtering: surfaces what matters and quiets what
+  doesn't, but as a *negotiated* filter, not a silent one — every
+  deprioritized item stays visible and reachable (nothing is auto-deleted
+  or hidden outright), the user can see why the assistant called it
+  low-priority and override any single call or the rule behind it, and the
+  bar is tunable per source/contact rather than one fixed "importance"
+  model imposed on everyone. Defers to the user's stated preferences over
+  its own guess whenever the two conflict. (**paid**, part of the
+  assistant wedge)
 
 **Exit criteria:** daily-driver usable as a notification/inbox aggregator,
 with a working, honestly-described private-assistant upsell.
@@ -339,7 +348,7 @@ it's allowed to touch:
 
 | Phase | Assistant capability |
 |---|---|
-| 1 | Read-only Q&A over inbox/calendar/contacts |
+| 1 | Read-only Q&A over inbox/calendar/contacts, plus negotiated importance/distraction filtering (transparent, overridable per item or per rule, nothing auto-hidden or deleted) |
 | 2 | Write actions with per-action confirmation |
 | 3–5 | Read access to vault/health/finance only with explicit, scoped, revocable grants — never blanket access |
 | 6 | Device-control actions, confirmation required for anything irreversible |

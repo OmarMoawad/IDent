@@ -4,8 +4,8 @@ import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/bro
 import { startRegistration } from "@simplewebauthn/browser";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
-import { unwrapAmk } from "../../lib/amk";
-import { ApiError, apiGet, apiPost } from "../../lib/api";
+import { unwrapAmk, wrapAmk } from "../../lib/amk";
+import { ApiError, apiGet, apiPost, apiPut } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
 import {
   PRF_AMK_LOCKED_PLACEHOLDER,
@@ -16,6 +16,7 @@ import {
   unwrapAmkWithPrfOutput,
   wrapAmkWithPrfOutput,
 } from "../../lib/prf";
+import { normalizeRecoveryCode } from "../../lib/recovery-code";
 
 export default function AccountPage() {
   const router = useRouter();
@@ -26,6 +27,9 @@ export default function AccountPage() {
   const [unlockPassword, setUnlockPassword] = useState("");
   const [unlocking, setUnlocking] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
+  const [recoverySubmitting, setRecoverySubmitting] = useState(false);
 
   useEffect(() => {
     if (!restoring && !auth) router.replace("/login");
@@ -111,6 +115,36 @@ export default function AccountPage() {
     }
   }
 
+  async function handleGenerateRecoveryCode() {
+    setRecoveryCode(null);
+    setRecoveryStatus(null);
+    setRecoverySubmitting(true);
+    try {
+      const { recoveryCode: code } = await apiPost<{ recoveryCode: string }>(
+        "/identity/recovery/generate",
+        {},
+        auth?.sessionToken,
+      );
+      setRecoveryCode(code);
+
+      if (auth?.amk) {
+        const wrappedAmkKey = await wrapAmk(auth.amk, normalizeRecoveryCode(code));
+        await apiPut("/identity/recovery/wrap", { wrappedAmkKey }, auth?.sessionToken);
+        setRecoveryStatus(
+          "New recovery code generated and can unlock your vault key. Any older recovery code no longer works. Save this one somewhere safe — it won't be shown again.",
+        );
+      } else {
+        setRecoveryStatus(
+          "New recovery code generated — it can log you back in, but your vault key was locked so this code can't unlock it yet. Unlock with your password, then generate a new code to enable vault-key recovery too. Save this code somewhere safe — it won't be shown again.",
+        );
+      }
+    } catch (err) {
+      setRecoveryStatus(err instanceof ApiError ? err.message : "Could not generate a recovery code.");
+    } finally {
+      setRecoverySubmitting(false);
+    }
+  }
+
   async function handleLogout() {
     setLoggingOut(true);
     try {
@@ -179,6 +213,15 @@ export default function AccountPage() {
         {passkeySubmitting ? "Registering passkey…" : "Register a passkey"}
       </button>
       {passkeyStatus && <p>{passkeyStatus}</p>}
+      <button type="button" onClick={handleGenerateRecoveryCode} disabled={recoverySubmitting}>
+        {recoverySubmitting ? "Generating…" : "Generate a recovery code"}
+      </button>
+      {recoveryCode && (
+        <p>
+          Your recovery code: <code>{recoveryCode}</code>
+        </p>
+      )}
+      {recoveryStatus && <p>{recoveryStatus}</p>}
       <button type="button" onClick={handleLogout} disabled={loggingOut}>
         {loggingOut ? "Logging out…" : "Log out"}
       </button>

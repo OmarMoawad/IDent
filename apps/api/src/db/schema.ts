@@ -68,6 +68,26 @@ export const accountMasterKeyWraps = pgTable(
 );
 
 /**
+ * A regenerable server-generated recovery code, hashed the same way as a
+ * password (see identity/password.ts — its scrypt implementation is generic,
+ * not password-specific). This is the "its own wrapped copy, its own
+ * factor" recovery path ARCHITECTURE.md's key-hierarchy note calls for: the
+ * code itself unlocks a session (like a password) and the matching
+ * account_master_key_wraps row with factor "recovery" (reusing that table,
+ * not a new one, because a recovery code is one interchangeable secret per
+ * identity, same as password). One row per identity — regenerating replaces
+ * it in place, invalidating the old code immediately.
+ */
+export const recoveryCredentials = pgTable("recovery_credentials", {
+  identityId: uuid("identity_id")
+    .primaryKey()
+    .references(() => identities.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Short-lived session tokens. Only the sha256 hash of the bearer token is
  * stored — the raw token is returned to the client once, at issuance, and
  * cannot be recovered from this table.

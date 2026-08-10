@@ -1,4 +1,5 @@
 import { hashPassword, verifyPassword } from "./password.js";
+import { generateRecoveryCode as generateRecoveryCodeValue, normalizeRecoveryCode } from "./recovery-code.js";
 import { SESSION_TTL_MS, generateSessionToken, hashSessionToken } from "./session.js";
 import {
   UsernameTakenError,
@@ -6,8 +7,11 @@ import {
   findActiveSessionByTokenHash,
   findAmkWrap,
   findIdentityByUsername,
+  findRecoveryCredentialByUsername,
   insertSession,
   revokeSessionByTokenHash,
+  upsertAmkWrap,
+  upsertRecoveryCredential,
 } from "./store.js";
 
 export { UsernameTakenError };
@@ -16,6 +20,13 @@ export class InvalidCredentialsError extends Error {
   constructor() {
     super("Invalid username or password.");
     this.name = "InvalidCredentialsError";
+  }
+}
+
+export class InvalidRecoveryCodeError extends Error {
+  constructor() {
+    super("Invalid username or recovery code.");
+    this.name = "InvalidRecoveryCodeError";
   }
 }
 
@@ -55,6 +66,17 @@ let dummyHash: Promise<string> | undefined;
 function getDummyHash(): Promise<string> {
   if (!dummyHash) dummyHash = hashPassword("timing-safety-placeholder-never-a-real-password");
   return dummyHash;
+}
+
+// Same timing-safety trick as getDummyHash, kept as its own cached value
+// (not shared with the password one) so the two factors stay independently
+// reasoned-about even though the underlying scrypt call is identical.
+let dummyRecoveryHash: Promise<string> | undefined;
+function getDummyRecoveryHash(): Promise<string> {
+  if (!dummyRecoveryHash) {
+    dummyRecoveryHash = hashPassword("timing-safety-placeholder-never-a-real-recovery-code");
+  }
+  return dummyRecoveryHash;
 }
 
 export type Session = {
@@ -125,4 +147,37 @@ export async function logout(sessionToken: string): Promise<void> {
  */
 export async function getAmkWrap(identityId: string, factor: string): Promise<string | null> {
   return findAmkWrap(identityId, factor);
+}
+
+/**
+ * Generates a fresh recovery code, stores its hash (replacing any previous
+ * code — see recovery_credentials' comment in schema.ts), and returns the
+ * plaintext code exactly once. The caller is responsible for showing it to
+ * the user and then wrapping the AMK with it via setRecoveryAmkWrap — the
+ * server never learns the AMK either way, same as the password factor.
+ */
+export async function generateRecoveryCode(identityId: string): Promise<string> {
+  const code = generateRecoveryCodeValue();
+  const codeHash = await hashPassword(normalizeRecoveryCode(code));
+  await upsertRecoveryCredential(identityId, codeHash);
+  return code;
+}
+
+/**
+ * Stores the client-computed AMK wrap for the "recovery" factor, reusing
+ * account_master_key_wraps (see its comment in schema.ts for why recovery
+ * doesn't need its own wrap table the way passkeys do). Opaque passthrough,
+ * same convention as every other factor's wrap.
+ */
+export async function setRecoveryAmkWrap(identityId: string, wrappedAmkKey: string): Promise<void> {
+  await upsertAmkWrap({ identityId, factor: "recovery", wrappedKey: wrappedAmkKey });
+}
+
+export async function loginWithRecoveryCode(input: { username: string; recoveryCode: string }): Promise<Session> {
+  const record = await findRecoveryCredentialByUsername(input.username);
+  const codeHash = record?.codeHash ?? (await getDummyRecoveryHash());
+  const valid = await verifyPassword(normalizeRecoveryCode(input.recoveryCode), codeHash);
+
+  if (!record || !valid) throw new InvalidRecoveryCodeError();
+  return issueSession(record.identityId, record.username);
 }

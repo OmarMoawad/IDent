@@ -171,6 +171,163 @@ describe("POST /identity/logout", () => {
   });
 });
 
+describe("POST /identity/recovery/generate + PUT /identity/recovery/wrap", () => {
+  it("generates a code, accepts a wrap for it, and the code then logs in", async () => {
+    const app = buildApp();
+    const { response: registerResponse, body } = await registerUser(app);
+    const { sessionToken } = registerResponse.json();
+
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/generate",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+    expect(generateResponse.statusCode).toBe(201);
+    const { recoveryCode } = generateResponse.json();
+    expect(typeof recoveryCode).toBe("string");
+    expect(recoveryCode.length).toBeGreaterThan(10);
+
+    const wrapResponse = await app.inject({
+      method: "PUT",
+      url: "/identity/recovery/wrap",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: { wrappedAmkKey: "recovery-wrapped-amk-blob" },
+    });
+    expect(wrapResponse.statusCode).toBe(204);
+
+    const loginResponse = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/login",
+      payload: { username: body.username, recoveryCode },
+    });
+    expect(loginResponse.statusCode).toBe(200);
+    const session = loginResponse.json();
+    expect(session.username).toBe(body.username);
+
+    const amkWrapResponse = await app.inject({
+      method: "GET",
+      url: "/identity/amk-wrap?factor=recovery",
+      headers: { authorization: `Bearer ${session.sessionToken}` },
+    });
+    expect(amkWrapResponse.statusCode).toBe(200);
+    expect(amkWrapResponse.json()).toEqual({ factor: "recovery", wrappedKey: "recovery-wrapped-amk-blob" });
+
+    await app.close();
+  });
+
+  it("rejects generate/wrap without a session", async () => {
+    const app = buildApp();
+    const generateResponse = await app.inject({ method: "POST", url: "/identity/recovery/generate" });
+    expect(generateResponse.statusCode).toBe(401);
+
+    const wrapResponse = await app.inject({
+      method: "PUT",
+      url: "/identity/recovery/wrap",
+      payload: { wrappedAmkKey: "irrelevant" },
+    });
+    expect(wrapResponse.statusCode).toBe(401);
+
+    await app.close();
+  });
+
+  it("regenerating invalidates the previous code", async () => {
+    const app = buildApp();
+    const { response: registerResponse, body } = await registerUser(app);
+    const { sessionToken } = registerResponse.json();
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/generate",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+    const { recoveryCode: firstCode } = first.json();
+
+    await app.inject({
+      method: "POST",
+      url: "/identity/recovery/generate",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+
+    const loginWithOldCode = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/login",
+      payload: { username: body.username, recoveryCode: firstCode },
+    });
+    expect(loginWithOldCode.statusCode).toBe(401);
+
+    await app.close();
+  });
+});
+
+describe("POST /identity/recovery/login", () => {
+  it("rejects a wrong recovery code", async () => {
+    const app = buildApp();
+    const { response: registerResponse, body } = await registerUser(app);
+    const { sessionToken } = registerResponse.json();
+    await app.inject({
+      method: "POST",
+      url: "/identity/recovery/generate",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/login",
+      payload: { username: body.username, recoveryCode: "WRONG-WRONG-WRONG-WRONG" },
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("rejects a username that never generated a recovery code", async () => {
+    const app = buildApp();
+    const { body } = await registerUser(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/login",
+      payload: { username: body.username, recoveryCode: "AAAAA-AAAAA-AAAAA-AAAAA" },
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("rejects a username that doesn't exist", async () => {
+    const app = buildApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/login",
+      payload: { username: uniqueUsername(), recoveryCode: "AAAAA-AAAAA-AAAAA-AAAAA" },
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("accepts the code with or without hyphens and regardless of case", async () => {
+    const app = buildApp();
+    const { response: registerResponse, body } = await registerUser(app);
+    const { sessionToken } = registerResponse.json();
+    const generateResponse = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/generate",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+    const { recoveryCode } = generateResponse.json();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/recovery/login",
+      payload: { username: body.username, recoveryCode: recoveryCode.replace(/-/g, "").toLowerCase() },
+    });
+
+    expect(response.statusCode).toBe(200);
+    await app.close();
+  });
+});
+
 describe("GET /identity/amk-wrap", () => {
   it("returns the wrap stored at registration, defaulting to the password factor", async () => {
     const app = buildApp();

@@ -5,34 +5,47 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-10 (session 8 — Phase 0B slice: real passkey-derived
-AMK wrapping via the WebAuthn PRF extension, replacing the
-"prf-not-yet-implemented" placeholder. Registration does a two-step
-create()-then-get() ceremony to pull a PRF secret (create()-time PRF
-results aren't reliable cross-browser); login evaluates PRF in the same
-get() ceremony the server already runs for authentication, so unlocking
-costs no extra gesture. Each passkey's wrap is now stored per-credential
-(new `passkey_amk_wraps` table, migration `0003_easy_redwing.sql`) instead
-of per-factor, because unlike password, different passkeys have different
-PRF secrets and can't share one wrap. `npm run typecheck`, `npm run test`
-(30 passing, up from 26), and `npm run build` all pass across every
-workspace, and the HTTP contract (extensions in options responses,
-`GET /identity/amk-wrap?factor=passkey&credentialId=...`, ownership
-isolation) was verified against the live dev API with curl. **Manually
-click-through-verified in a real browser (Touch ID) by Omar**: register →
-passkey registration produces a real PRF wrap ("you can use it to log in
-and unlock your vault key") → log out → log in with the passkey alone,
-AMK loads with no password re-entry → reload (AMK re-locks, as designed)
-→ "Unlock with passkey" button unlocks it again with no password. One real
-bug was caught and fixed during this verification: the PRF extension's
-`eval.first` must be raw bytes (`BufferSource`) per spec, not a base64url
-string — `@simplewebauthn/browser` doesn't know about the `prf` extension
-so (unlike `challenge`) it never decodes it, and the first attempt passed
-a string, which the browser rejected outright ("Passkey registration
-failed or was cancelled"). Fixed in `apps/web/lib/prf.ts` (client-only
-ceremonies now build `eval.first` as bytes directly) and `login/page.tsx`
-(new `decodePrfEvalExtensions` decodes the server's base64url before the
-real WebAuthn call). See "Next tasks" below for what's still not built).
+Last updated: 2026-08-10 (session 9 — Phase 0B slice: the recovery-code
+factor, unblocking passwordless registration per session 8's "next tasks"
+note. A server-generated, 20-character (100-bit) recovery code is the
+"its own wrapped copy, its own factor" recovery path ARCHITECTURE.md's
+key-hierarchy note calls for: `POST /identity/recovery/generate`
+(authenticated) mints one, hashes it the same way as a password (reusing
+`identity/password.ts`'s scrypt implementation, which was already generic)
+into a new `recovery_credentials` table (migration
+`0004_medical_bill_hollister.sql`, one row per identity — regenerating
+replaces it, invalidating the old code immediately), and returns the
+plaintext once. `PUT /identity/recovery/wrap` then stores the client's
+AMK wrap for factor "recovery" — reusing `account_master_key_wraps`
+(no new wrap table needed: a recovery code, like a password, is one
+interchangeable secret per identity, unlike per-credential passkeys).
+`POST /identity/recovery/login` mirrors password login exactly, including
+the timing-safe dummy-hash trick against username enumeration. The
+existing `GET /identity/amk-wrap?factor=recovery` route needed zero
+changes — its generic `else` branch already handled any factor besides
+"passkey". apps/web: `/account` gained a "Generate a recovery code" button
+(shows the code once, wraps the AMK with it via the existing
+`amk.ts` PBKDF2/AES-GCM functions if the AMK is loaded, an honest "can't
+unlock yet" message if not — same pattern as the PRF-unsupported
+placeholder); `/login` gained a collapsible recovery-code login form.
+`npm run typecheck`, `npm run test` (40 passing, up from 30), and
+`npm run build` all pass across every workspace; the new migration
+applied clean against a live local Postgres; the full HTTP contract
+(generate → wrap → recovery-login → fetch-wrap, plus wrong-code and
+no-session-token rejections) was re-verified with curl against the live
+dev API. **Not browser-click-through-verified this session** — the
+Chrome browser-automation tool couldn't render `localhost`/`127.0.0.1`
+pages in this environment (external sites worked fine; every local dev
+URL came back "Frame with ID 0 is showing error page" across two tabs and
+both hostnames), unlike sessions 5-8 which all got a real click-through.
+Omar should click through register → generate recovery code → log out →
+log in with the recovery code → confirm the AMK unlocks, the same way he
+verified the PRF work in session 8, before this is considered as solid as
+the rest of Phase 0B. Also added a ROADMAP.md Phase 1 line (at Omar's
+request, mid-session): AI-assisted importance filtering that's
+*negotiated*, not silent — every deprioritized item stays visible, the
+user can override any call or the rule behind it, and the bar is tunable
+per source/contact. See "Next tasks" below for what's still not built.
 
 ## Current phase
 
@@ -54,15 +67,20 @@ of a placeholder — both at login (single ceremony) and via a new "Unlock
 with passkey" button on /account. When a passkey can't produce a real PRF
 secret (unsupported authenticator, or the AMK was locked at registration
 time), apps/web stores and surfaces an honest, distinguishable placeholder
-instead of fabricating ciphertext nothing could unwrap later. All of this
-has a real UI in apps/web (`/register`, `/login`, `/account`), fully
-click-through-verified in a real browser this session, including the PRF
-ceremony (see header). Password hashes, session tokens, passkey
-credentials/signatures, and both AMK wrap/unwrap paths (password and
-passkey/PRF) are all real — none of this is stubbed.
+instead of fabricating ciphertext nothing could unwrap later, generate a
+server-issued recovery code, wrap the AMK with it, log back in using only
+that code if password and passkey are both unavailable, and unwrap the AMK
+with it too. All of this has a real UI in apps/web (`/register`, `/login`,
+`/account`), including the PRF ceremony and the recovery-code flow — the
+PRF work was click-through-verified in a real browser in session 8; this
+session's recovery-code work was not (see header for why) and still needs
+that pass. Password hashes, session tokens, passkey credentials/
+signatures, and all three AMK wrap/unwrap paths (password, passkey/PRF,
+recovery code) are real — none of this is stubbed.
 
-Not done: passwordless registration and step-up auth for High/Critical
-tier modules (see "Next tasks").
+Not done: passwordless registration (the recovery-path blocker is now
+resolved — see "Next tasks") and step-up auth for High/Critical tier
+modules.
 
 ### 0A checklist status
 
@@ -194,6 +212,36 @@ read.
   unlocks the AMK → reload (re-locks) → "Unlock with passkey" unlocks it
   again. Caught and fixed one real bug along the way — see this file's
   header for the `eval.first` bytes-vs-base64url-string mismatch.
+- Recovery-code factor: new `recovery_credentials` table (migration
+  `0004_medical_bill_hollister.sql`), `POST /identity/recovery/generate`
+  (authenticated, mints and stores a hashed code, returns the plaintext
+  once), `PUT /identity/recovery/wrap` (authenticated, stores the client's
+  AMK wrap under the existing `account_master_key_wraps` table with
+  `factor: "recovery"`), and `POST /identity/recovery/login` (mirrors
+  `/identity/login`'s shape and its timing-safe dummy-hash username-
+  enumeration defense exactly). `apps/api/src/identity/recovery-code.ts` is
+  new: `generateRecoveryCode()` produces a `XXXXX-XXXXX-XXXXX-XXXXX`
+  Crockford-base32-ish code (~100 bits of entropy, ambiguous characters
+  I/L/O/U excluded since it's meant to be handwritten and retyped) and
+  `normalizeRecoveryCode()` strips hyphens/whitespace/case before hashing
+  or verifying — mirrored client-side in `apps/web/lib/recovery-code.ts` so
+  the same normalized string is what gets hashed server-side and what
+  derives the AMK-wrap KEK client-side. 10 new tests (40 total in the API
+  workspace): generate→wrap→recovery-login→fetch-wrap round trip,
+  regenerating invalidates the previous code, wrong code / unknown
+  username / never-generated-a-code all reject, hyphens/case are ignored
+  on login, both new endpoints reject a missing session token, plus 3 unit
+  tests for the code generator's format/uniqueness. apps/web: `/account`
+  gained a "Generate a recovery code" button (shows the code once with a
+  save-it warning; wraps the AMK with it immediately if the AMK is loaded,
+  otherwise an honest "generated but can't unlock the vault yet" message —
+  same pattern as the PRF-unsupported placeholder, no fabricated
+  ciphertext); `/login` gained a collapsible "Log in with a recovery code"
+  form. `npm run typecheck`, `npm run test`, and `npm run build` all pass
+  across every workspace; the new migration applied clean against a live
+  local Postgres; the full HTTP contract was re-verified with curl against
+  the live dev API (see header for why this substituted for a browser
+  click-through this session).
 
 ## Architecture decisions made in this scaffold
 
@@ -349,6 +397,24 @@ read.
   every contract these pages call. Adding a real frontend test harness is
   future work, not silently skipped — worth doing once apps/web has enough
   pages that manual click-throughs stop scaling.
+- **The recovery code is long-lived, not single-use or auto-rotated on
+  successful login.** Reusing it as many times as needed (like a password)
+  was chosen over invalidating it after one login, because rotation would
+  require the client to immediately regenerate-and-rewrap in the same
+  authenticated flow right after a recovery login — real extra scope this
+  slice didn't need to take on when "regenerate manually whenever you want
+  a fresh code" (the existing "Generate a recovery code" button) already
+  covers the same threat model at the cost of one more manual step. Logged
+  as a deliberate deferral, not an oversight — see the known-gaps log below
+  for when it'd be worth revisiting.
+- **Recovery code generation is a two-step HTTP exchange
+  (`POST .../generate` then `PUT .../wrap`), not one call like password
+  registration.** Password registration sends password+wrappedAmkKey
+  together because the client already knows the password before calling.
+  Here the client can't wrap anything with a secret it doesn't have yet —
+  the server has to generate and return the code first. Same
+  opaque-passthrough convention as every other factor once the second call
+  happens: the server never sees the unwrapped AMK either way.
 
 ## Dependency audit (2026-08-08)
 
@@ -464,9 +530,18 @@ block Phase 0B and none should be designed now:
   identity that already has a password (see the architecture-decision note
   above). Registering with only a passkey, no password, is a real Phase 0
   goal (ARCHITECTURE.md's "password remains a fallback" implies passkey can
-  be primary) but needs its own recovery-path thinking first — an identity
-  whose only factor is a passkey on a lost device needs a designed way
-  back in, not an afterthought.
+  be primary). The recovery-path blocker this was waiting on is now built
+  (session 9's recovery-code factor) — see "Next tasks" for what's left:
+  designing the actual create-identity-with-passkey-only ceremony and
+  deciding whether generating a recovery code should be mandatory (not just
+  offered) during that flow, since a passwordless identity with no recovery
+  code yet would have no way back in at all if the one passkey is lost
+  before one is ever generated.
+- **Recovery code is long-lived, not single-use** — see the
+  architecture-decision note above for the reasoning. Worth revisiting if
+  real usage shows people never manually regenerate after using one, since
+  that would mean a once-exposed code (e.g. read over someone's shoulder)
+  stays valid indefinitely.
 - **WebAuthn login-options username enumeration** — see the
   architecture-decision note above. A narrow, accepted gap specific to
   `/identity/webauthn/login/options`; password login already closed the
@@ -486,14 +561,23 @@ everything else builds on should be solid before more surface area sits on
 top of it, and "solid" specifically means real passkey-based AMK unlock,
 not just passkey login, plus the recovery-path and step-up items below.
 (Real passkey-based AMK unlock was completed and click-through-verified in
-session 8 — see this file's header.)
+session 8 — see this file's header. The recovery-path design/build was
+completed in session 9, but not yet browser-click-through-verified — see
+this file's header for why, and do that verification before treating it
+as done the way session 8's PRF work is.)
 
-1. Passwordless registration — see the future-gaps entry above. Now that
-   real passkey UI (including PRF-based AMK wrapping, as of session 8)
-   exists to build against, the remaining blocker is purely the
-   recovery-path design (an identity whose only factor is a passkey on a
-   lost device needs a designed way back in).
-2. Step-up auth / elevated sessions for High/Critical tier modules — see
+1. Browser-click-through-verify session 9's recovery-code flow (register →
+   generate a recovery code → log out → log in with only the recovery code
+   → confirm the AMK unlocks) — this environment's browser-automation tool
+   couldn't reach localhost this session, so only curl-against-the-live-API
+   and vitest have verified it so far.
+2. Passwordless registration — see the future-gaps entry above. Now that
+   real passkey UI (PRF-based AMK wrapping, session 8) and a real recovery
+   path (recovery-code factor, session 9) both exist, the remaining work is
+   the create-identity-with-passkey-only ceremony itself, plus deciding
+   whether generating a recovery code should be a mandatory step of that
+   flow rather than a separately offered one (see the future-gaps entry).
+3. Step-up auth / elevated sessions for High/Critical tier modules — see
    the future-gaps entry above. Not needed until a Phase 3+ module ships a
    write path, but the base-session/elevated-session split is easier to
    add before any module depends on "one session tier" than after.

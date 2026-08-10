@@ -4,6 +4,7 @@ import {
   accountMasterKeyWraps,
   identities,
   passwordCredentials,
+  recoveryCredentials,
   sessions,
   usernameAliases,
 } from "../db/schema.js";
@@ -105,6 +106,50 @@ export async function findAmkWrap(identityId: string, factor: string): Promise<s
     .where(and(eq(accountMasterKeyWraps.identityId, identityId), eq(accountMasterKeyWraps.factor, factor)))
     .limit(1);
   return rows[0]?.wrappedKey ?? null;
+}
+
+export type IdentityByUsernameForRecovery = {
+  identityId: string;
+  username: string;
+  codeHash: string;
+};
+
+/**
+ * Mirrors findIdentityByUsername but joins recovery_credentials instead of
+ * password_credentials — returns null both for an unknown username and for
+ * a real identity that has never generated a recovery code, since the
+ * caller (loginWithRecoveryCode) treats both the same way for timing safety.
+ */
+export async function findRecoveryCredentialByUsername(
+  username: string,
+): Promise<IdentityByUsernameForRecovery | null> {
+  const rows = await db
+    .select({
+      identityId: identities.id,
+      username: usernameAliases.username,
+      codeHash: recoveryCredentials.codeHash,
+    })
+    .from(usernameAliases)
+    .innerJoin(identities, eq(identities.id, usernameAliases.identityId))
+    .innerJoin(recoveryCredentials, eq(recoveryCredentials.identityId, identities.id))
+    .where(eq(usernameAliases.username, username))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Replaces the identity's recovery code hash — one row per identity, so
+ * regenerating invalidates the previous code immediately rather than
+ * leaving multiple valid codes outstanding.
+ */
+export async function upsertRecoveryCredential(identityId: string, codeHash: string): Promise<void> {
+  await db
+    .insert(recoveryCredentials)
+    .values({ identityId, codeHash })
+    .onConflictDoUpdate({
+      target: recoveryCredentials.identityId,
+      set: { codeHash, updatedAt: new Date() },
+    });
 }
 
 export async function insertSession(input: {
