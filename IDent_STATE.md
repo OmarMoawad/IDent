@@ -88,9 +88,26 @@ token they'd been reusing is now invalid by design. `npm run typecheck`,
 That same review also ran `gitleaks detect` (full history, both this repo
 and Receiptless) as a reproducible check on top of the session's earlier
 manual secret-pattern grep before either repo went public — both came back
-clean, no leaks found. This follow-up doesn't change what's still
-outstanding: the real-browser click-through above is still the only item
-left on the pre-Phase-1 gate.
+clean, no leaks found.
+
+**Real-browser click-through, completed 2026-08-11 (still session 12):**
+Omar ran it himself against `npm run dev:api` + `npm run dev:web` on his
+own machine, since the Chrome browser-automation tool's sandboxed network
+still couldn't reach `localhost` on a second attempt this same day (see
+above — a stable environment split, not a fluke). Register → `/account`'s
+"View protected demo data" correctly denied (403, not elevated) →
+re-entered password under "Step-up verification" → elevate succeeded,
+button now succeeds (200) → **reloaded the page and it still worked** —
+confirms elevation is genuinely server-side truth (`sessions.elevatedUntil`
+in Postgres), not something that only worked because client state hadn't
+reset → waited past the 5-minute `ELEVATION_TTL_MS` window and the button
+correctly denied again (403), confirmed against the API's own request log
+(timestamps ~305s apart, matching the 300s TTL almost exactly). No bugs
+found this pass — unlike sessions 9-11's click-throughs, which each caught
+something vitest/curl couldn't, this one held up clean on the first real
+try. **This closes the external review's pre-Phase-1 gate.** Phase 1
+(ROADMAP.md — Communications Hub) can start; see "Next tasks" below for
+how it's being sequenced, the same session-by-session way Phase 0B was.
 
 Also from session 11 (kept here as history, superseded as "current" by
 the above): real browser click-through verification of sessions 9 and
@@ -177,9 +194,12 @@ documented intent, not a task.
 
 ## Current phase
 
-**Phase 0B — Identity Core** (ROADMAP.md Phase 0), in progress. Phase 0A
-(ROADMAP.md Era I) is fully done — see its checklist below, unchanged since
-session 3.
+**Phase 0B — Identity Core** (ROADMAP.md Phase 0) is now **done** — step-up
+auth's real-browser click-through completed 2026-08-11 (see this file's
+header), closing the external review's pre-Phase-1 gate. Phase 0A
+(ROADMAP.md Era I) has been done since session 3 — see its checklist
+below. **Phase 1 — Communications Hub** (ROADMAP.md) starts next; see
+"Next tasks" below for how it's sequenced.
 
 Done so far: register with a username + password (with a real client-side
 Account Master Key generated, wrapped, and sent to the server), log in with
@@ -211,10 +231,10 @@ session tokens, passkey credentials/signatures, and all three AMK
 wrap/unwrap paths (password, passkey/PRF, recovery code) are real — none
 of this is stubbed.
 
-Not done: step-up auth is now built and unit-tested (session 12) but not
-yet browser-click-through-verified (see this file's header and "Next
-tasks") — that verification is the only item left on the pre-Phase-1 gate
-an external review set in session 8.
+Step-up auth (session 12) is done, tests and all, including the
+real-browser click-through (see this file's header) — the last item on
+the pre-Phase-1 gate an external review set in session 8. Phase 0B is
+closed; Phase 1 is next.
 
 ### 0A checklist status
 
@@ -448,9 +468,9 @@ read.
   typecheck`, `npm run test`, and `npm run build` all pass across every
   workspace; the migration applied clean against a live local Postgres.
   apps/web's `/account` gained a "Step-up verification" section that
-  switches to the rotated token on a successful elevate. **Not yet
-  browser-click-through-verified — see this file's header for why and
-  what's needed next.**
+  switches to the rotated token on a successful elevate. **Real-browser
+  click-through-verified by Omar, 2026-08-11 — see this file's header.**
+  This closed the external review's pre-Phase-1 gate; Phase 0B is done.
 
 ## Architecture decisions made in this scaffold
 
@@ -579,8 +599,10 @@ read.
   under either placeholder is fully real for *logging in*; it just can't
   unlock the AMK until re-registered with the AMK loaded. See the
   "Completed components" entry above for the full mechanism (per-credential
-  wraps, the two-ceremony registration pattern, and why). **Not yet
-  browser-click-through-verified** — see this file's header.
+  wraps, the two-ceremony registration pattern, and why). Browser-
+  click-through-verified in session 8 (Touch ID) — this note was stale
+  (still said "not yet" long after that), fixed while closing out session
+  12's own click-through note elsewhere in this file.
 - **The session token persists across a reload via `sessionStorage`; the
   AMK never persists at all, by design.** `sessionStorage` was chosen over
   `localStorage` (indefinite, cross-tab, higher exposure window) and over
@@ -814,55 +836,85 @@ block Phase 0B and none should be designed now:
 
 ## Next tasks, in order
 
-Do not start Phase 1 (or any later phase) before these are done — per an
-external review of this repo (2026-08-09): the identity/key foundation
-everything else builds on should be solid before more surface area sits on
-top of it, and "solid" specifically means real passkey-based AMK unlock,
-not just passkey login, plus the recovery-path and step-up items below.
-(Real passkey-based AMK unlock was completed and click-through-verified in
-session 8. Recovery-path and passwordless registration were completed in
-sessions 9 and 10 and **click-through-verified in session 11** — which
-also found and fixed two real bugs the verification pass exists to catch
-(see this file's header). Step-up auth was built and unit-tested in
-session 12 against every item of the requirement list a 2026-08-11
-external review set — see this file's header for the full design writeup
-and "Completed components" above for what shipped. Its real-browser
-click-through, below, is now the only item left on this gate.)
+**The pre-Phase-1 gate (external review, 2026-08-09) is now fully
+satisfied.** Real passkey-based AMK unlock (session 8), recovery-path and
+passwordless registration (sessions 9-10, click-through-verified session
+11), and step-up auth (session 12, click-through-verified 2026-08-11 — see
+this file's header) are all done, tested, and browser-verified. Phase 0B
+is closed. **Phase 1 — Communications Hub** (ROADMAP.md) starts now.
 
-1. **Browser-click-through-verify step-up auth, guided, the same way
-   session 11 verified sessions 9 and 10's work.** Session 12 built and
-   unit-tested every item of the 2026-08-11 external review's requirement
-   list (distinct elevated-session state, explicit shorter-than-base-session
-   expiry, elevation via password/passkey/recovery re-entry reusing
-   existing verify paths, no client-controlled trust-tier claims,
-   route/middleware-level enforcement, replay-resistance, non-elevated-
-   session-rejected and expired-elevation-rejected tests) but could not do
-   the review's last requirement — a real-browser click-through — itself
-   this session: the sandboxed dev servers and the Chrome
-   browser-automation tool turned out to be on different loopback
-   interfaces (`curl localhost:3000` succeeded from the sandbox shell while
-   the browser tool got a network error on the same URL), the same class of
-   gap sessions 9 and 10 hit before session 11 closed it manually. Walk
-   through, in a real browser against `npm run dev:api` + `npm run dev:web`:
-   register or log in → on `/account`, confirm "View protected demo data"
-   is denied (session not elevated) → re-enter the password under "Step-up
-   verification" → confirm the same button now succeeds → optionally also
-   try the recovery-code and passkey elevation paths (`POST
-   /identity/elevate/recovery`, `/webauthn/options` + `/webauthn/verify` —
-   no dedicated UI for those two yet, curl or a REST client is fine) → wait
-   past the 5-minute `ELEVATION_TTL_MS` window (or temporarily shrink it
-   for the test) and confirm the button is denied again. Fix anything the
-   click-through catches, the way session 11 did. Once this is done, the
-   external review's pre-Phase-1 gate is fully satisfied and Phase 1 can
-   start.
+Phase 1's ROADMAP.md entry is five bullets (unified inbox, contact cards,
+calendar+reminders, a read-only AI assistant, negotiated importance
+filtering) but each is real, multi-day work — the same situation
+Receiptless's own Phase 1 was in before it got broken into a
+session-by-session cadence (see `/Users/Omar/receiptless/
+RECEIPTLESS_STATE.md`). Sequenced the same way here, foundation before
+UI before intelligence, mirroring how Phase 0B itself was built
+(schema-only sessions before auth sessions before UI sessions):
 
-2. **Delete the synthetic demo route** (`GET
-   /identity/demo/high-tier-secret`, `identity/elevation-routes.ts`) once a
-   real High/Critical-tier module (Phase 3+) ships a route that can carry
-   the "prove elevation is enforced" burden instead — it exists only
-   because session 12 had nothing real to guard yet. Not urgent; do it
-   alongside whichever Phase 3+ slice adds the first real one, not as a
-   standalone cleanup pass.
+1. **Communications Hub schema + connected-source data model
+   (foundation only, no external provider wiring yet).** A `ConnectedSource`
+   table (identity_id, provider, encrypted OAuth token material, status) and
+   a unified `Message` table (source reference, external ID, subject,
+   snippet/body, timestamp, read status, participants) that any future
+   provider connector normalizes into — the same "one canonical shape
+   regardless of input" principle Receiptless's own `Receipt` model uses.
+   No UI, no real OAuth yet; seed/test data only, the way Phase 0A started
+   with just an infra-proving table. This is the next session to do.
+
+2. **OAuth connection flow, first provider (Gmail).** **Needs Omar**:
+   a Google Cloud project, OAuth consent screen, and client ID/secret —
+   can't be guessed at or defaulted. Store tokens encrypted at rest (this
+   is exactly the kind of Medium-tier data SECURITY.md's tiering exists
+   for). `POST /identity/connections/gmail/{options,callback}` or
+   equivalent, session-gated like every other post-Phase-0B route.
+
+3. **Message sync.** Pull recent messages from a connected Gmail account,
+   normalize into `Message` rows via Session 1's schema. Background job or
+   on-demand endpoint — decide which before writing code (a genuinely open
+   design question, not one to improvise mid-session: on-demand is simpler
+   to ship and test, a background job is what "daily-driver inbox
+   aggregator" actually needs — likely on-demand first, background job as
+   a fast-follow once the sync logic itself is proven).
+
+4. **Unified inbox UI.** List/read/search messages across whatever
+   sources are connected — the first user-facing surface of Phase 1.
+   Exit-criteria-relevant: this is what makes IDent "daily-driver usable
+   as a notification/inbox aggregator" per ROADMAP.md's own bar.
+
+5. **Contact cards.** Unify contacts surfaced by connected sources into
+   one record per person — not calling/communications routing yet (that's
+   Phase 2+/Phase 10), just a unified read model.
+
+6. **Calendar + reminders.** Likely a second OAuth scope on the same
+   Gmail/Google connection from Session 2 (Google Calendar), or a second
+   provider — decide when this session starts, informed by whichever
+   provider Session 2 actually picked.
+
+7. **Basic AI assistant (paid tier, the monetization wedge — see
+   BOOTSTRAP.md).** Read-only Q&A over the user's own inbox/calendar/
+   contacts. **Needs Omar**: which LLM provider/API — not decided
+   anywhere in this repo yet, don't default to one silently.
+
+8. **AI-assisted importance filtering (paid).** The most design-heavy
+   item in Phase 1's ROADMAP.md entry — re-read that entry's constraints
+   before starting: negotiated not silent, nothing auto-hidden or
+   auto-deleted, per-source/contact tunable, defers to the user's stated
+   preference over its own guess. Sequenced last because it's the
+   highest-judgment, most easily-gotten-wrong piece — build it against a
+   working inbox (Sessions 1-4), not before one exists.
+
+Re-baseline this list once Session 1 actually starts — providers,
+sync-strategy, and AI-assistant choices made along the way may reorder or
+reshape sessions 2-8, the same way Receiptless's own cadence already got
+revised once mid-flight.
+
+**Delete the synthetic demo route** (`GET /identity/demo/high-tier-secret`,
+`identity/elevation-routes.ts`) once a real High/Critical-tier module
+(Phase 3+, not this list) ships a route that can carry the "prove
+elevation is enforced" burden instead. Not urgent, not part of the Phase 1
+sequence above — do it alongside whichever Phase 3+ slice adds the first
+real High/Critical route.
 
 ## Deployment instructions
 
