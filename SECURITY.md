@@ -39,6 +39,18 @@ ARCHITECTURE.md.
     exists to protect yet either (Phase 3+), so a synthetic demo route
     (`GET /identity/demo/high-tier-secret`) currently proves the mechanism;
     delete it once a real one ships.
+  - **Session-token rotation on elevation** (added same session, after a
+    2026-08-11 external review flagged the gap): elevation used to be a
+    pure attribute of the existing session row, so a *stolen* pre-elevation
+    bearer token would silently inherit elevation the moment the legitimate
+    owner elevated that same session — no re-authentication of the
+    attacker's own required. Every `elevate*` call now also rotates the
+    session's bearer token (`store.ts`'s `elevateSessionById` sets a new
+    `tokenHash` in the same update) and returns the new raw token to the
+    caller; the old token stops matching any session immediately, not just
+    for elevated routes. Standard OWASP session-management guidance
+    (regenerate the session identifier on a privilege change), applied here
+    rather than left as a known gap.
 - No single credential decrypts every module at once — the key hierarchy in
   ARCHITECTURE.md enforces this structurally, not just as a UI gate
 

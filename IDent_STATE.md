@@ -23,10 +23,10 @@ login already used, via a shared `verifyAssertion` extracted from
 client-controlled trust-tier claim — elevation status is read fresh from
 the DB on every request; enforcement is a Fastify `preHandler` hook
 (`identity/elevation.ts`'s `requireElevatedSession`), not a per-handler
-inline check a route could ship without; replay-resistant by
-construction — there's no separate elevation artifact to steal, just the
-same base session token re-checked against `sessions.elevatedUntil` server-side
-every time, past which it simply stops passing. Resolved the session's
+inline check a route could ship without; **the session's bearer token is
+now rotated on every successful elevation** (see the follow-up paragraph
+below for why — this replaces an earlier, weaker "same token, just
+re-checked" design). Resolved the session's
 one open design question (a synthetic route vs. an isolated untested
 primitive) by building a demo-only `GET /identity/demo/high-tier-secret`
 guarded by the hook, since no real High/Critical-tier module exists yet
@@ -54,6 +54,43 @@ session 11 closed it manually. Needs the same treatment: Omar
 click-through-verifying step-up in a real browser next session, guided
 step by step. Once that's done, the external review's pre-Phase-1 gate is
 fully satisfied and Phase 1 can start — see "Next tasks" below.
+
+**Same-day follow-up (2026-08-11, still session 12):** a second external
+review — asked to check the session-12 work itself, not just re-read this
+file — independently verified the CI run, the tests, and the backend
+implementation, and flagged one real design gap the "replay-resistant by
+construction" claim above had understated: elevation was a pure attribute
+of the *existing* session row, so a bearer token stolen **before**
+elevation would silently start passing `requireElevatedSession` the
+moment the legitimate owner elevated that same session — no
+re-authentication of the attacker's own required, since nothing about the
+token itself changed. Fixed the same session: every `elevate*` function
+(`elevateWithPassword`, `elevateWithRecoveryCode`,
+`elevateWithPasskeyAssertion`) now also rotates the session's bearer
+token — `store.ts`'s `elevateSessionById` sets a new `tokenHash` in the
+same update as `elevatedUntil`, and the elevate endpoints return the new
+raw token in the response body (`{elevatedUntil, sessionToken}` instead of
+just `{elevatedUntil}`). The old token stops matching any session the
+instant elevation succeeds — not just for elevated routes, for
+everything, since it's the same bearer credential. Standard OWASP
+session-management guidance (regenerate the session identifier on a
+privilege change), applied rather than left as a known gap. apps/web's
+`/account` step-up form now switches `auth.sessionToken` to the rotated
+value on a successful elevate (`setAuth` already persists whichever token
+it's given to `sessionStorage`, so this needed no persistence-layer
+change). One new test (`identity/elevation.test.ts`, 60 total): the
+pre-elevation token is confirmed dead (401, not just un-elevated) after a
+successful elevation, and the rotated token is confirmed to actually work.
+The three existing elevation-success tests were updated to capture and use
+the rotated token for their post-elevation assertions, since the original
+token they'd been reusing is now invalid by design. `npm run typecheck`,
+`npm run test`, and `npm run build` all pass across every workspace.
+That same review also ran `gitleaks detect` (full history, both this repo
+and Receiptless) as a reproducible check on top of the session's earlier
+manual secret-pattern grep before either repo went public — both came back
+clean, no leaks found. This follow-up doesn't change what's still
+outstanding: the real-browser click-through above is still the only item
+left on the pre-Phase-1 gate.
 
 Also from session 11 (kept here as history, superseded as "current" by
 the above): real browser click-through verification of sessions 9 and
@@ -403,12 +440,17 @@ read.
   password`, `/recovery`, `/webauthn/options`, `/webauthn/verify`, and a
   demo-only `GET /identity/demo/high-tier-secret` guarded by a new Fastify
   `preHandler` hook (`identity/elevation.ts`'s `requireElevatedSession`).
-  10 new tests (59 total in the API workspace) in
-  `identity/elevation.test.ts`. `npm run typecheck`, `npm run test`, and
-  `npm run build` all pass across every workspace; the migration applied
-  clean against a live local Postgres. apps/web's `/account` gained a
-  "Step-up verification" section. **Not yet browser-click-through-verified
-  — see this file's header for why and what's needed next.**
+  Every elevate call also rotates the session's bearer token (same-day
+  follow-up after a second external review — see this file's header) —
+  the elevate endpoints return `{elevatedUntil, sessionToken}`, and the
+  old token is dead the instant elevation succeeds. 11 new tests (60 total
+  in the API workspace) in `identity/elevation.test.ts`. `npm run
+  typecheck`, `npm run test`, and `npm run build` all pass across every
+  workspace; the migration applied clean against a live local Postgres.
+  apps/web's `/account` gained a "Step-up verification" section that
+  switches to the rotated token on a successful elevate. **Not yet
+  browser-click-through-verified — see this file's header for why and
+  what's needed next.**
 
 ## Architecture decisions made in this scaffold
 

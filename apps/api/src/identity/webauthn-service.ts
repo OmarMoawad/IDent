@@ -18,11 +18,12 @@ import { generateRecoveryCode as generateRecoveryCodeValue, normalizeRecoveryCod
 import {
   ElevationVerificationError,
   type AuthenticatedIdentity,
+  type ElevationResult,
   assertValidUsername,
   issueSession,
   type Session,
 } from "./service.js";
-import { ELEVATION_TTL_MS } from "./session.js";
+import { ELEVATION_TTL_MS, generateSessionToken, hashSessionToken } from "./session.js";
 import { elevateSessionById, findIdentityByUsername } from "./store.js";
 import { CHALLENGE_TTL_MS, ORIGIN, RP_ID, RP_NAME, getPrfSaltBase64Url } from "./webauthn-config.js";
 import {
@@ -354,14 +355,15 @@ export async function verifyAuthentication(
 export async function elevateWithPasskeyAssertion(
   identity: Pick<AuthenticatedIdentity, "sessionId" | "username">,
   response: AuthenticationResponseJSON,
-): Promise<Date> {
+): Promise<ElevationResult> {
   await verifyAssertion(identity.username, response).catch(() => {
     throw new ElevationVerificationError();
   });
 
   const elevatedUntil = new Date(Date.now() + ELEVATION_TTL_MS);
-  await elevateSessionById(identity.sessionId, elevatedUntil);
-  return elevatedUntil;
+  const sessionToken = generateSessionToken();
+  await elevateSessionById(identity.sessionId, elevatedUntil, hashSessionToken(sessionToken));
+  return { elevatedUntil, sessionToken };
 }
 
 /**

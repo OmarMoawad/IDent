@@ -156,6 +156,20 @@ export async function logout(sessionToken: string): Promise<void> {
 }
 
 /**
+ * Returned by every elevate* function below — elevatedUntil is the new
+ * expiry, sessionToken is a *new* bearer token the caller must switch to.
+ * The old token stops working the instant elevation succeeds (store.ts's
+ * elevateSessionById rotates it in the same update) — see that function's
+ * comment for why: it closes the gap where a stolen pre-elevation token
+ * would otherwise silently inherit elevation from the legitimate owner's
+ * next re-authentication.
+ */
+export type ElevationResult = {
+  elevatedUntil: Date;
+  sessionToken: string;
+};
+
+/**
  * Re-verifies the password factor for an *already-authenticated* identity
  * (the caller must have validated the bearer session first — see
  * elevation-routes.ts) and, on success, elevates that same session in
@@ -166,15 +180,16 @@ export async function logout(sessionToken: string): Promise<void> {
 export async function elevateWithPassword(
   identity: Pick<AuthenticatedIdentity, "sessionId" | "username">,
   password: string,
-): Promise<Date> {
+): Promise<ElevationResult> {
   const record = await findIdentityByUsername(identity.username);
   const passwordHash = record?.passwordHash ?? (await getDummyHash());
   const valid = await verifyPassword(password, passwordHash);
   if (!record || !valid) throw new ElevationVerificationError();
 
   const elevatedUntil = new Date(Date.now() + ELEVATION_TTL_MS);
-  await elevateSessionById(identity.sessionId, elevatedUntil);
-  return elevatedUntil;
+  const sessionToken = generateSessionToken();
+  await elevateSessionById(identity.sessionId, elevatedUntil, hashSessionToken(sessionToken));
+  return { elevatedUntil, sessionToken };
 }
 
 /**
@@ -185,15 +200,16 @@ export async function elevateWithPassword(
 export async function elevateWithRecoveryCode(
   identity: Pick<AuthenticatedIdentity, "sessionId" | "username">,
   recoveryCode: string,
-): Promise<Date> {
+): Promise<ElevationResult> {
   const record = await findRecoveryCredentialByUsername(identity.username);
   const codeHash = record?.codeHash ?? (await getDummyRecoveryHash());
   const valid = await verifyPassword(normalizeRecoveryCode(recoveryCode), codeHash);
   if (!record || !valid) throw new ElevationVerificationError();
 
   const elevatedUntil = new Date(Date.now() + ELEVATION_TTL_MS);
-  await elevateSessionById(identity.sessionId, elevatedUntil);
-  return elevatedUntil;
+  const sessionToken = generateSessionToken();
+  await elevateSessionById(identity.sessionId, elevatedUntil, hashSessionToken(sessionToken));
+  return { elevatedUntil, sessionToken };
 }
 
 /**

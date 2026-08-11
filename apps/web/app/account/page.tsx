@@ -196,11 +196,16 @@ export default function AccountPage() {
     setDemoError(null);
     setElevating(true);
     try {
-      const result = await apiPost<{ elevatedUntil: string }>(
+      const result = await apiPost<{ elevatedUntil: string; sessionToken: string }>(
         "/identity/elevate/password",
         { password: stepUpPassword },
         auth?.sessionToken,
       );
+      // The API rotates the bearer token on every successful elevation (see
+      // apps/api's elevation.ts) — the old token is dead the instant this
+      // succeeds, so the client must switch to the new one immediately, not
+      // just track elevatedUntil.
+      setAuth(auth ? { ...auth, sessionToken: result.sessionToken } : null);
       setElevatedUntil(result.elevatedUntil);
       setStepUpPassword("");
     } catch (err) {

@@ -55,7 +55,7 @@ describe("Step-up / elevated sessions", () => {
     await app.close();
   });
 
-  it("elevates via the password factor and unlocks the demo route", async () => {
+  it("elevates via the password factor, rotates the token, and unlocks the demo route", async () => {
     const app = buildApp();
     const { username, password, sessionToken } = await registerUser(app);
 
@@ -66,9 +66,13 @@ describe("Step-up / elevated sessions", () => {
       payload: { password },
     });
     expect(elevateResponse.statusCode).toBe(200);
-    expect(typeof elevateResponse.json().elevatedUntil).toBe("string");
+    const elevateBody = elevateResponse.json();
+    expect(typeof elevateBody.elevatedUntil).toBe("string");
+    expect(typeof elevateBody.sessionToken).toBe("string");
+    expect(elevateBody.sessionToken).not.toBe(sessionToken);
+    const elevatedToken = elevateBody.sessionToken as string;
 
-    const demoResponse = await getDemoRoute(app, sessionToken);
+    const demoResponse = await getDemoRoute(app, elevatedToken);
     expect(demoResponse.statusCode).toBe(200);
     const body = demoResponse.json();
     expect(typeof body.secret).toBe("string");
@@ -77,10 +81,44 @@ describe("Step-up / elevated sessions", () => {
     const meResponse = await app.inject({
       method: "GET",
       url: "/identity/me",
-      headers: { authorization: `Bearer ${sessionToken}` },
+      headers: { authorization: `Bearer ${elevatedToken}` },
     });
     expect(meResponse.json().username).toBe(username);
     expect(typeof meResponse.json().elevatedUntil).toBe("string");
+
+    await app.close();
+  });
+
+  it("invalidates the pre-elevation token once elevation rotates it", async () => {
+    // The scenario this closes: a stolen base-session token would otherwise
+    // silently inherit elevation the moment the legitimate owner elevates
+    // that same session, with no re-authentication of its own. Rotating the
+    // token on elevation means the old raw token is dead everywhere (not
+    // just for elevated routes) the instant elevation succeeds — see
+    // store.ts's elevateSessionById.
+    const app = buildApp();
+    const { password, sessionToken } = await registerUser(app);
+
+    const elevateResponse = await app.inject({
+      method: "POST",
+      url: "/identity/elevate/password",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: { password },
+    });
+    const { sessionToken: elevatedToken } = elevateResponse.json();
+
+    const oldTokenMe = await app.inject({
+      method: "GET",
+      url: "/identity/me",
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+    expect(oldTokenMe.statusCode).toBe(401);
+
+    const oldTokenDemo = await getDemoRoute(app, sessionToken);
+    expect(oldTokenDemo.statusCode).toBe(401);
+
+    const newTokenDemo = await getDemoRoute(app, elevatedToken);
+    expect(newTokenDemo.statusCode).toBe(200);
 
     await app.close();
   });
@@ -121,8 +159,9 @@ describe("Step-up / elevated sessions", () => {
       payload: { recoveryCode },
     });
     expect(elevateResponse.statusCode).toBe(200);
+    const { sessionToken: elevatedToken } = elevateResponse.json();
 
-    const demoResponse = await getDemoRoute(app, sessionToken);
+    const demoResponse = await getDemoRoute(app, elevatedToken);
     expect(demoResponse.statusCode).toBe(200);
 
     await app.close();
@@ -186,8 +225,9 @@ describe("Step-up / elevated sessions", () => {
       payload: { response: assertion },
     });
     expect(elevateVerifyResponse.statusCode).toBe(200);
+    const { sessionToken: elevatedToken } = elevateVerifyResponse.json();
 
-    const demoResponse = await getDemoRoute(app, sessionToken);
+    const demoResponse = await getDemoRoute(app, elevatedToken);
     expect(demoResponse.statusCode).toBe(200);
 
     await app.close();
@@ -249,16 +289,20 @@ describe("Step-up / elevated sessions", () => {
       payload: { password },
     });
     expect(elevateResponse.statusCode).toBe(200);
+    const { sessionToken: elevatedToken } = elevateResponse.json();
 
     // Confirm it actually works before expiry, then jump the clock past
     // ELEVATION_TTL_MS — proves this is a real expiry check against
-    // sessions.elevatedUntil, not a static/one-shot flag.
-    expect((await getDemoRoute(app, sessionToken)).statusCode).toBe(200);
+    // sessions.elevatedUntil, not a static/one-shot flag. Uses the rotated
+    // token throughout (see the "invalidates the pre-elevation token" test
+    // above) — the original sessionToken is dead after elevation, not just
+    // un-elevated, so it can't be reused here to observe the expiry.
+    expect((await getDemoRoute(app, elevatedToken)).statusCode).toBe(200);
 
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + ELEVATION_TTL_MS + 1000);
 
-    const expiredResponse = await getDemoRoute(app, sessionToken);
+    const expiredResponse = await getDemoRoute(app, elevatedToken);
     expect(expiredResponse.statusCode).toBe(403);
 
     await app.close();

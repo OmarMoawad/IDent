@@ -23,8 +23,10 @@ export function registerElevationRoutes(app: FastifyInstance): void {
     const [password] = fields;
 
     try {
-      const elevatedUntil = await elevateWithPassword(identity, password);
-      return reply.code(200).send({ elevatedUntil: elevatedUntil.toISOString() });
+      const result = await elevateWithPassword(identity, password);
+      return reply
+        .code(200)
+        .send({ elevatedUntil: result.elevatedUntil.toISOString(), sessionToken: result.sessionToken });
     } catch (err) {
       if (err instanceof ElevationVerificationError) return reply.code(401).send({ error: err.message });
       throw err;
@@ -41,8 +43,10 @@ export function registerElevationRoutes(app: FastifyInstance): void {
     const [recoveryCode] = fields;
 
     try {
-      const elevatedUntil = await elevateWithRecoveryCode(identity, recoveryCode);
-      return reply.code(200).send({ elevatedUntil: elevatedUntil.toISOString() });
+      const result = await elevateWithRecoveryCode(identity, recoveryCode);
+      return reply
+        .code(200)
+        .send({ elevatedUntil: result.elevatedUntil.toISOString(), sessionToken: result.sessionToken });
     } catch (err) {
       if (err instanceof ElevationVerificationError) return reply.code(401).send({ error: err.message });
       throw err;
@@ -71,11 +75,13 @@ export function registerElevationRoutes(app: FastifyInstance): void {
     if (!isRecord(body.response)) return reply.code(400).send({ error: "response is required." });
 
     try {
-      const elevatedUntil = await elevateWithPasskeyAssertion(
+      const result = await elevateWithPasskeyAssertion(
         identity,
         body.response as unknown as Parameters<typeof elevateWithPasskeyAssertion>[1],
       );
-      return reply.code(200).send({ elevatedUntil: elevatedUntil.toISOString() });
+      return reply
+        .code(200)
+        .send({ elevatedUntil: result.elevatedUntil.toISOString(), sessionToken: result.sessionToken });
     } catch (err) {
       if (err instanceof ElevationVerificationError) return reply.code(401).send({ error: err.message });
       throw err;

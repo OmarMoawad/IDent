@@ -207,15 +207,32 @@ export async function revokeSessionByTokenHash(tokenHash: string): Promise<void>
 }
 
 /**
- * Elevates an existing base session in place (SECURITY.md's tiering) —
- * never creates a new session/token. Guarded by the same revoked/expired
- * check as findActiveSessionByTokenHash so a dead base session can't be
- * elevated back into validity by racing a factor re-verification against
- * its own expiry/logout.
+ * Elevates an existing base session in place (SECURITY.md's tiering) — same
+ * session row (id/identityId/createdAt unchanged), never a second
+ * session/token — but rotates the bearer token's hash in the same update.
+ * Without this, elevation would be a pure attribute of the session row: if a
+ * base session's bearer token had already been stolen (session hijack, the
+ * base session's own long-standing risk), the *attacker's* copy of that
+ * token would silently start passing requireElevatedSession the moment the
+ * legitimate owner elevated the same session — no new re-authentication by
+ * the attacker required. Rotating the token here means the old raw token
+ * stops matching any row's tokenHash the instant elevation succeeds, so a
+ * stolen pre-elevation copy is dead, not quietly upgraded (OWASP session
+ * management guidance: regenerate the session identifier on any privilege
+ * change). The caller is responsible for handing the new raw token back to
+ * the legitimate client — see identity/service.ts and
+ * identity/webauthn-service.ts's elevate* functions. Guarded by the same
+ * revoked/expired check as findActiveSessionByTokenHash so a dead base
+ * session can't be elevated back into validity by racing a factor
+ * re-verification against its own expiry/logout.
  */
-export async function elevateSessionById(sessionId: string, elevatedUntil: Date): Promise<void> {
+export async function elevateSessionById(
+  sessionId: string,
+  elevatedUntil: Date,
+  newTokenHash: string,
+): Promise<void> {
   await db
     .update(sessions)
-    .set({ elevatedUntil })
+    .set({ elevatedUntil, tokenHash: newTokenHash })
     .where(and(eq(sessions.id, sessionId), isNull(sessions.revokedAt), gt(sessions.expiresAt, new Date())));
 }
