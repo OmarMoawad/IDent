@@ -5,10 +5,15 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-11 (session 14 — Gmail OAuth connection flow, the
-second slice of **Phase 1: Communications Hub** — see session 13's
-paragraph below for the schema foundation this builds on. Built to the
-same-day session-13 review's pre-connector checklist point by point:
+Last updated: 2026-08-12 (item 2.5's real-browser Gmail OAuth
+click-through — done, with Omar, and it found a real bug; see the header
+paragraph below "Still open, unchanged by this follow-up" for the full
+writeup. Session 15 — real message sync — can now start with actual
+confidence in the connector underneath it.) Session 14 — Gmail OAuth
+connection flow, the second slice of **Phase 1: Communications Hub** —
+see session 13's paragraph below for the schema foundation this builds
+on. Built to the same-day session-13 review's pre-connector checklist
+point by point:
 
 - **Real Google Cloud OAuth credentials** — Omar created the project,
   consent screen (External, `gmail.readonly` scope only, test users),
@@ -143,6 +148,50 @@ localhost here. See "Next tasks" below for the exact walkthrough — do
 this before session 15 starts importing real messages, the same way the
 pre-Phase-1 gate wasn't considered closed until its own click-through
 happened.
+
+**Click-through done, 2026-08-12 — and it caught a real bug before it
+ever reached Google.** Every step of item 2.5's checklist below passed:
+Omar registered a test identity via the real `/register` UI, started the
+connection, approved a real Gmail account's consent screen, landed back
+on `/account?gmail=connected`, and `connected_sources` showed
+`status: connected` with a genuine `provider_account_email` matching the
+account used and an opaque encrypted token blob (previewed a few bytes —
+no resemblance to a real `ya29.` Google access token). A forced refresh
+(temporarily widening `ACCESS_TOKEN_REFRESH_BUFFER_MS`, per the
+checklist's own suggestion, via a one-off script — reverted after)
+confirmed the stored access token actually changed, verified by decrypting
+and comparing the full token string, not just its prefix (Google access
+tokens share a common `ya29.a0AR...`-style prefix, so a prefix match alone
+proves nothing). Disconnect cleared `encrypted_token_data` and flipped
+`status` to `disconnected` in the database, and Omar confirmed the app no
+longer appears on Google's own
+[Third-party apps & services](https://myaccount.google.com/permissions)
+page.
+
+Before any of that worked, the very first `POST
+/identity/connections/gmail/start` call built an authorization URL with
+`client_id=` — **empty**. Root cause: `apps/api/src/index.ts` (and
+`db/migrate.ts`) used a bare `import "dotenv/config"`, which resolves
+`.env` relative to `process.cwd()` — but this repo's own documented
+`npm run dev:api` (`DEVELOPMENT.md`) runs `npm run dev -w apps/api`,
+and npm workspace commands set `cwd` to the workspace directory
+(`apps/api`), not the repo root where `.env` actually lives. That means
+`GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET` — which have no
+dev-fallback default, unlike `DATABASE_URL` and the other dev-convenience
+constants — silently evaluated to empty strings on every single
+`npm run dev:api` invocation since session 14 introduced them, with
+nothing that would have surfaced the failure short of an actual attempt
+to reach Google. Session 14's own credential verification (this file's
+header, above) must have been run some other way — directly from
+`apps/api`, or with `.env` manually sourced — since it did genuinely
+reach Google's token endpoint. Fixed with a new
+`apps/api/src/load-env.ts`, resolving `.env`'s path from the source
+file's own location (`import.meta.url`) rather than `cwd`, imported by
+both `index.ts` and `db/migrate.ts` in place of the bare
+`"dotenv/config"`. Verified the fix against the actual documented
+`npm run dev:api` command (not a workaround) before re-running the rest
+of the click-through. `npm run typecheck`, `npm run test` (107 passing),
+and `npm run build` all pass across every workspace after the fix.
 
 Also from session 13 — first slice of **Phase 1:
 Communications Hub**, now that Phase 0B is closed — see session 12's
@@ -1132,12 +1181,12 @@ UI before intelligence, mirroring how Phase 0B itself was built
    `POST .../:sourceId/disconnect`. Hardened same-day (session 14.5): PKCE
    and per-mailbox account identity (dedup on reconnect) — see header.
 
-2.5. **Real-browser-verify the Gmail connector end to end. Do this before
-   session 15.** Not yet done — session 14's own credential check only
-   proved Google recognizes the client ID/secret, not that a real consent
-   flow completes. Same standard as session 12's step-up-auth
-   click-through, guided step by step since the sandboxed browser tool
-   still can't reach localhost here:
+2.5. ~~**Real-browser-verify the Gmail connector end to end.**~~ — done,
+   with Omar, 2026-08-12 (see this file's header, "Click-through done"
+   paragraph, for the full writeup). Every checklist step below passed;
+   the walkthrough also caught and fixed a real bug (`.env` silently
+   never loading via the documented `npm run dev:api` command — see
+   header). Original checklist, kept for reference:
    1. `npm run dev:api` + `npm run dev:web`, log in as a real (test)
       identity on `/account`.
    2. `curl -X POST http://localhost:4000/identity/connections/gmail/start
@@ -1160,11 +1209,8 @@ UI before intelligence, mirroring how Phase 0B itself was built
       `encrypted_token_data` is cleared in the database, and that Google's
       own [Third-party apps & services](https://myaccount.google.com/permissions)
       page no longer lists this connection.
-   Fix anything this catches, the way session 11 and 12's click-throughs
-   did. Once this passes, session 15 can start syncing real messages
-   with real confidence in the connector underneath it.
 
-3. **Message sync. Do this after 2.5 above.** Pull recent messages
+3. **Message sync. Do this now that 2.5 is done.** Pull recent messages
    from a connected Gmail account (via `getActiveGmailAccessToken` from
    session 14 — it already handles refreshing an expired token, so this
    session shouldn't need to touch that logic), normalize into `messages`
