@@ -50,6 +50,13 @@
       "when": 1786435874708,
       "tag": "0006_great_the_anarchist",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786439490221,
+      "tag": "0007_exotic_ultimates",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,39 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-11 (session 12 — step-up auth / elevated sessions,
+Last updated: 2026-08-11 (session 13 — first slice of **Phase 1:
+Communications Hub**, now that Phase 0B is closed — see session 12's
+paragraphs below for how that gate closed. Per "Next tasks"' session-1
+scope: schema + connected-source data model only, no OAuth, no HTTP routes,
+no UI yet. New tables `connected_sources` (identity_id, provider, status,
+an `encrypted_token_data` column nothing writes to yet) and `messages`
+(the unified shape every future connector normalizes into — subject/
+snippet/body/participants/occurredAt/isRead, denormalized `identityId` so
+identity-scoped queries are a single indexed lookup, not a join through
+`connected_sources`) — migration `0007_exotic_ultimates.sql`. Both tables
+stay in the existing `db/schema.ts` file for now (migration-history
+convenience under the Phase 0-2 modular-monolith note in ARCHITECTURE.md);
+the module boundary ARCHITECTURE.md's "Domain services" calls for is
+enforced at the code layer instead — new `comms/store.ts` only ever
+queries these two tables plus the identities.id foreign key every domain
+is allowed to anchor to, never another domain's internal tables. A unique
+index on `(sourceId, externalId)` makes `upsertMessage` idempotent, so a
+future re-sync of the same source updates content rather than creating
+duplicate rows — and deliberately leaves `isRead` alone on re-sync
+(re-importing shouldn't silently flip something the user already read
+back to unread, or vice versa). No HTTP layer yet — nothing external to
+call it from until a real OAuth connector exists (session 2 of the Phase 1
+cadence) — so `comms/store.test.ts` exercises the store functions
+directly against a live Postgres, the same way Phase 0A's first commit
+proved migrations worked before anything called them over HTTP. 8 new
+tests (68 total): insert/find round trip, cross-identity isolation for
+both connected sources and messages (including a direct by-id lookup, not
+just the list query), upsert idempotency and content-refresh-on-resync,
+isRead surviving a resync, and newest-first ordering. `npm run typecheck`,
+`npm run test`, and `npm run build` all pass across every workspace; the
+migration applied clean against a live local Postgres.
+
+Also from session 12 — step-up auth / elevated sessions,
 per the pre-Phase-1 gate's last remaining item, confirmed as this
 session's starting task by a 2026-08-11 external review — see "Next
 tasks" below for the requirement list it sharpened SECURITY.md's one
@@ -194,12 +226,15 @@ documented intent, not a task.
 
 ## Current phase
 
-**Phase 0B — Identity Core** (ROADMAP.md Phase 0) is now **done** — step-up
+**Phase 0B — Identity Core** (ROADMAP.md Phase 0) is **done** — step-up
 auth's real-browser click-through completed 2026-08-11 (see this file's
 header), closing the external review's pre-Phase-1 gate. Phase 0A
 (ROADMAP.md Era I) has been done since session 3 — see its checklist
-below. **Phase 1 — Communications Hub** (ROADMAP.md) starts next; see
-"Next tasks" below for how it's sequenced.
+below. **Phase 1 — Communications Hub** (ROADMAP.md) is now in progress:
+session 13 (see this file's header) laid the schema/data-model foundation
+(`connected_sources`, `messages`) with no OAuth, routes, or UI yet — see
+"Next tasks" below for the full session-by-session sequencing and what's
+next (session 2 of that list: the first real OAuth connector, Gmail).
 
 Done so far: register with a username + password (with a real client-side
 Account Master Key generated, wrapped, and sent to the server), log in with
@@ -471,6 +506,16 @@ read.
   switches to the rotated token on a successful elevate. **Real-browser
   click-through-verified by Omar, 2026-08-11 — see this file's header.**
   This closed the external review's pre-Phase-1 gate; Phase 0B is done.
+- **Phase 1 — Communications Hub, session 13 (see this file's header for
+  the full design writeup): schema/data-model foundation only.** New
+  `connected_sources` and `messages` tables (migration
+  `0007_exotic_ultimates.sql`), new `comms/store.ts` (insert/find
+  connected sources and messages, all identity-scoped; `upsertMessage` is
+  idempotent on `(sourceId, externalId)`). No OAuth, no HTTP routes, no UI
+  yet — `comms/store.test.ts` exercises the store layer directly against a
+  live Postgres. 8 new tests (68 total in the API workspace). `npm run
+  typecheck`, `npm run test`, and `npm run build` all pass across every
+  workspace; the migration applied clean against a live local Postgres.
 
 ## Architecture decisions made in this scaffold
 
@@ -852,17 +897,13 @@ RECEIPTLESS_STATE.md`). Sequenced the same way here, foundation before
 UI before intelligence, mirroring how Phase 0B itself was built
 (schema-only sessions before auth sessions before UI sessions):
 
-1. **Communications Hub schema + connected-source data model
-   (foundation only, no external provider wiring yet).** A `ConnectedSource`
-   table (identity_id, provider, encrypted OAuth token material, status) and
-   a unified `Message` table (source reference, external ID, subject,
-   snippet/body, timestamp, read status, participants) that any future
-   provider connector normalizes into — the same "one canonical shape
-   regardless of input" principle Receiptless's own `Receipt` model uses.
-   No UI, no real OAuth yet; seed/test data only, the way Phase 0A started
-   with just an infra-proving table. This is the next session to do.
+1. ~~**Communications Hub schema + connected-source data model**~~ — done
+   in session 13 (see this file's header and "Completed components"
+   above): `connected_sources` and `messages` tables, `comms/store.ts`,
+   8 tests. No UI, no real OAuth yet — that's next.
 
-2. **OAuth connection flow, first provider (Gmail).** **Needs Omar**:
+2. **OAuth connection flow, first provider (Gmail). This is the next
+   session to do.** **Needs Omar**:
    a Google Cloud project, OAuth consent screen, and client ID/secret —
    can't be guessed at or defaulted. Store tokens encrypted at rest (this
    is exactly the kind of Medium-tier data SECURITY.md's tiering exists

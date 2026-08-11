@@ -1,4 +1,4 @@
-import { integer, pgTable, primaryKey, serial, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, primaryKey, serial, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Phase 0A infra-proving table only — confirms migrations run end to end.
@@ -199,3 +199,79 @@ export const webauthnChallenges = pgTable("webauthn_challenges", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
 });
+
+/**
+ * Phase 1 — Communications Hub (ROADMAP.md, ARCHITECTURE.md's "Domain
+ * services": communications is its own module family with its own
+ * datastore, no shared tables across modules). Both tables below live in
+ * this same schema.ts file for now purely as a migration-history
+ * convenience (Phase 0-2 is a deliberate modular monolith per
+ * ARCHITECTURE.md's current-phase note — physically one Postgres instance)
+ * — the module boundary is enforced at the code layer instead:
+ * comms/store.ts only ever queries these two tables plus a foreign-key
+ * reference to identities.id (the one thing every domain is allowed to
+ * anchor to, same as every Identity Core table), never another domain's
+ * internal tables (password_credentials, webauthn_credentials, sessions,
+ * etc.). Revisit physical schema-file separation if/when this module
+ * needs actual separate deployment — see ARCHITECTURE.md.
+ *
+ * Foundation only this session (IDent_STATE.md's "Next tasks" — session
+ * 13 of Phase 1): no OAuth, no external provider, no HTTP routes yet.
+ * comms/store.ts is exercised directly by comms/store.test.ts against a
+ * live Postgres, the same way Phase 0A's first commit proved migrations
+ * work end to end before anything called it over HTTP.
+ */
+export const connectedSources = pgTable("connected_sources", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  identityId: uuid("identity_id")
+    .notNull()
+    .references(() => identities.id, { onDelete: "cascade" }),
+  // e.g. "gmail" — no real provider integration exists yet (a later Phase 1
+  // session wires up actual OAuth), so nothing currently populates this
+  // beyond test/seed data.
+  provider: text("provider").notNull(),
+  status: text("status").notNull().default("pending"),
+  // Opaque, encrypted-at-rest ciphertext once a real OAuth connector exists
+  // — this column exists now so the schema shape doesn't change again when
+  // that lands, but nothing writes to it yet. Never a plaintext token.
+  encryptedTokenData: text("encrypted_token_data"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The unified message/notification shape every future connector (Gmail,
+ * other providers) normalizes into — one canonical object regardless of
+ * source, same "unify, don't replace" principle as Receiptless's own
+ * canonical Receipt object. identityId is denormalized onto this table
+ * (not just reachable via sourceId -> connectedSources.identityId) so
+ * every query that scopes "this identity's messages" is a single indexed
+ * lookup, not a join through connected_sources every time.
+ */
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => connectedSources.id, { onDelete: "cascade" }),
+    // The provider's own message ID — paired with sourceId in the unique
+    // index below so re-syncing the same source is idempotent (upsert on
+    // conflict) instead of creating duplicate rows every sync run.
+    externalId: text("external_id").notNull(),
+    subject: text("subject"),
+    snippet: text("snippet"),
+    body: text("body"),
+    // JSON-encoded array of {name, address} — no dedicated Contact table
+    // yet (that's a later Phase 1 session, "Contact cards"); kept as an
+    // opaque blob here rather than guessing at that table's eventual shape.
+    participants: text("participants"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    isRead: boolean("is_read").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("messages_source_external_id_idx").on(table.sourceId, table.externalId)],
+);
