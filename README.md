@@ -13,12 +13,16 @@ lost, dead, left behind — the same identity should still be reachable from
 an alternative access point, without that access point ever holding onto
 your keys once the session ends.
 
-> **Status: Phase 0A in progress.** The roadmap and system design below are
-> joined by an early monorepo scaffold (`apps/api`, `apps/web`,
-> `packages/shared`) — no user-facing product yet, no domain schema, no
-> deployment target. See [IDent_STATE.md](IDent_STATE.md) for exactly what's
-> done vs. pending before assuming anything here is further along than it
-> is, and [DEVELOPMENT.md](DEVELOPMENT.md) to run it locally.
+![IDent roadmap progress](docs/progress.svg)
+
+> **Status: Phase 0 (Identity Core) done, Phase 1 (Communications Hub) in
+> progress.** Real username+password accounts, passkeys, recovery codes,
+> and step-up auth are all built and browser-verified; Phase 1's schema
+> foundation and a real Gmail OAuth connector are in, no UI yet. The
+> progress bar above is regenerated after each session
+> (`scripts/generate-progress-svg.mjs`) — see
+> [IDent_STATE.md](IDent_STATE.md) for exactly what's done vs. pending in
+> detail, and [DEVELOPMENT.md](DEVELOPMENT.md) to run it locally.
 
 ## Why
 
