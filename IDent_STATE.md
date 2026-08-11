@@ -193,6 +193,19 @@ both `index.ts` and `db/migrate.ts` in place of the bare
 of the click-through. `npm run typecheck`, `npm run test` (107 passing),
 and `npm run build` all pass across every workspace after the fix.
 
+**Follow-up hardening, same day**: the click-through only caught the empty
+`client_id` because it happened to attempt a real connection — the bug
+was otherwise invisible. `index.ts` now logs a startup warning if
+`GOOGLE_OAUTH_CLIENT_ID`/`SECRET` are empty, so a misconfigured or
+unloaded `.env` shows up immediately in the server's own startup logs
+instead of waiting for someone to click through OAuth. Deliberately a
+warning, not a hard failure — Gmail OAuth is optional infrastructure
+(comms-config.ts's own comment: a server with no Google Cloud project
+should still boot fine for identity-only use), so refusing to start
+would break a legitimate setup. Verified both directions: forcing the
+env vars empty produces the warning, the normal `npm run dev:api` with
+the real `.env` stays silent.
+
 Also from session 13 — first slice of **Phase 1:
 Communications Hub**, now that Phase 0B is closed — see session 12's
 paragraphs below for how that gate closed. Per "Next tasks"' session-1
