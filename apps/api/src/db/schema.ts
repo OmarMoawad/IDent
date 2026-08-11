@@ -324,3 +324,32 @@ export const messages = pgTable(
     }).onDelete("cascade"),
   ],
 );
+
+/**
+ * CSRF/replay protection for a provider OAuth connection flow (session 14
+ * — comms/gmail-service.ts). Unlike identity/webauthn's challenges (looked
+ * up by identityId + purpose, since the caller already knows who it's
+ * talking to from an authenticated session), the OAuth callback is an
+ * anonymous top-level browser redirect from the provider — no bearer
+ * token, no session. `state` is the *only* thing correlating that request
+ * back to the identity and provider that started the flow, so it's the
+ * lookup key here (hence its own unique index), not identityId. Same
+ * single-use/short-lived shape as webauthn_challenges otherwise:
+ * consumedAt is set the moment it's checked, pass or fail, so a state
+ * value can never be replayed even after a failed callback.
+ */
+export const oauthStateChallenges = pgTable(
+  "oauth_state_challenges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    state: text("state").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  },
+  (table) => [uniqueIndex("oauth_state_challenges_state_idx").on(table.state)],
+);

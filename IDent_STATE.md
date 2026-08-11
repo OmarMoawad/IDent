@@ -5,7 +5,83 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-11 (session 13 — first slice of **Phase 1:
+Last updated: 2026-08-11 (session 14 — Gmail OAuth connection flow, the
+second slice of **Phase 1: Communications Hub** — see session 13's
+paragraph below for the schema foundation this builds on. Built to the
+same-day session-13 review's pre-connector checklist point by point:
+
+- **Real Google Cloud OAuth credentials** — Omar created the project,
+  consent screen (External, `gmail.readonly` scope only, test users),
+  and OAuth client himself; walked through step by step, since this is a
+  real third-party account only he can create. The pasted client ID/secret
+  had corrupted characters twice (a dropped hyphen, then an i/l mixup) —
+  each was verified against Google's own token endpoint before trusting
+  it: POSTing a deliberately invalid authorization code and checking
+  whether Google's error was `invalid_client` (credentials themselves
+  wrong) vs. `invalid_grant` (credentials fine, code rejected as
+  expected) — the second response is what confirmed the final pasted
+  values were genuine, without ever completing a real OAuth flow or
+  exposing the secret anywhere but this local `.env`.
+- **Encrypted token storage with real authenticated encryption**:
+  `comms/token-encryption.ts`, AES-256-GCM, iv+authTag+ciphertext packed
+  into one base64url blob (same convention as `apps/web/lib/amk.ts`'s
+  wrap format) — a tampered blob fails to decrypt instead of silently
+  returning corrupted plaintext, same discipline as the WebAuthn verify
+  functions. Uses session 13's previously-unused `encrypted_token_data`
+  column — no schema change needed for this part.
+- **Access and refresh tokens handled/rotated separately**: packed into
+  one encrypted JSON payload for storage, but `getActiveGmailAccessToken`
+  treats them as distinct fields with distinct lifecycles — a refresh
+  updates `accessToken`/`expiresAt` in place and only replaces
+  `refreshToken` if Google actually rotates it on that call.
+  `ACCESS_TOKEN_REFRESH_BUFFER_MS` (2 minutes) means a token is refreshed
+  *before* it's actually expired, not after a request already failed.
+- **Minimum scope**: `https://www.googleapis.com/auth/gmail.readonly`
+  only (`comms-config.ts`'s `GMAIL_SCOPE`).
+- **OAuth `state` validated**: new `oauth_state_challenges` table
+  (migration `0009_sturdy_dark_phoenix.sql`) — see its comment in
+  schema.ts for why this needs its own state-keyed lookup rather than
+  reusing identity/webauthn's identity-keyed challenge pattern (the
+  callback is an anonymous browser redirect with no bearer token; `state`
+  is the *only* thing correlating it back to who started the flow).
+  Single-use, short-lived (10 minutes), same atomic
+  consume-or-null shape as `webauthn-store.ts`'s `consumeChallenge`.
+- **Token-refresh tests**: `gmail-service.test.ts` proves a
+  near-expiry token gets refreshed and persisted, a still-valid one
+  doesn't trigger a refresh call, and a rotated refresh token is what
+  gets stored (checked via decrypting the raw stored blob, not just
+  observing the returned access token).
+- **Real disconnect/revocation**: `disconnectGmailSource` calls
+  Google's revoke endpoint (best-effort — Google being unreachable
+  shouldn't block clearing IDent's own copy) and then **clears the
+  stored tokens outright** (`clearConnectedSourceTokens`, from session
+  13's review) rather than only flipping a status label — a subsequent
+  `getActiveGmailAccessToken` call correctly fails with
+  `ConnectedSourceNotConnectedError` afterward.
+
+Testability without a real browser consent flow (which only a human can
+complete): `comms/google-oauth-client.ts` defines a `GoogleOAuthClient`
+interface the real Google-calling implementation and every
+`gmail-service.ts` function both take as an injectable parameter
+(defaulting to the real singleton) — `comms/test-support/
+fake-google-oauth-client.ts` is the injected double tests use, the same
+role `identity/test-support/software-authenticator.ts` plays for WebAuthn.
+32 new tests (101 total in the API workspace): encryption round-trip and
+tamper-rejection, OAuth state issuance/consumption/expiry/replay/race,
+connect/refresh/disconnect service-layer behavior via the fake client, and
+route-level auth-gating/validation/error-redirect tests that never call
+Google for real (kept deliberately separate from the fake-client tests —
+routes have no way to inject a fake client through HTTP, so route tests
+only cover paths that never reach `googleOAuthClient`). New routes: `POST
+/identity/connections/gmail/start`, `GET .../callback`, `POST
+.../:sourceId/disconnect`, registered in `app.ts`. `npm run typecheck`,
+`npm run test`, and `npm run build` all pass across every workspace; the
+migration applied clean against a live local Postgres. No web UI yet —
+that's session 4 ("Unified inbox UI") per the Phase 1 cadence; for now
+`POST /identity/connections/gmail/start` has to be called directly (curl
+or a REST client) to get a real authorization URL to visit.
+
+Also from session 13 — first slice of **Phase 1:
 Communications Hub**, now that Phase 0B is closed — see session 12's
 paragraphs below for how that gate closed. Per "Next tasks"' session-1
 scope: schema + connected-source data model only, no OAuth, no HTTP routes,
@@ -262,10 +338,13 @@ auth's real-browser click-through completed 2026-08-11 (see this file's
 header), closing the external review's pre-Phase-1 gate. Phase 0A
 (ROADMAP.md Era I) has been done since session 3 — see its checklist
 below. **Phase 1 — Communications Hub** (ROADMAP.md) is now in progress:
-session 13 (see this file's header) laid the schema/data-model foundation
-(`connected_sources`, `messages`) with no OAuth, routes, or UI yet — see
-"Next tasks" below for the full session-by-session sequencing and what's
-next (session 2 of that list: the first real OAuth connector, Gmail).
+session 13 laid the schema/data-model foundation (`connected_sources`,
+`messages`), session 14 (see this file's header) built the real Gmail
+OAuth connector on top of it — connect, refresh, disconnect, all
+encrypted, tested, and backed by real (verified) Google Cloud credentials.
+No UI yet — see "Next tasks" below for the full session-by-session
+sequencing and what's next (session 3 of that list: message sync, pulling
+real messages from a connected Gmail account into the `messages` table).
 
 Done so far: register with a username + password (with a real client-side
 Account Master Key generated, wrapped, and sent to the server), log in with
@@ -555,6 +634,22 @@ read.
   regression test proving a cross-identity `sourceId` is rejected. `npm run
   typecheck`, `npm run test`, and `npm run build` all pass across every
   workspace; the migration applied clean against a live local Postgres.
+- **Phase 1 — Communications Hub, session 14 (see this file's header for
+  the full design writeup): Gmail OAuth connection flow, real credentials,
+  built to the session-13 review's pre-connector checklist point by
+  point.** New `oauth_state_challenges` table (migration
+  `0009_sturdy_dark_phoenix.sql`), `comms/token-encryption.ts` (AES-256-GCM),
+  `comms/google-oauth-client.ts` (real client + injectable interface),
+  `comms/gmail-service.ts` (connect/refresh/disconnect, all
+  ownership-checked), `comms/gmail-routes.ts` (`POST /identity/
+  connections/gmail/start`, `GET .../callback`, `POST
+  .../:sourceId/disconnect`). 32 new tests (101 total in the API
+  workspace) via `comms/test-support/fake-google-oauth-client.ts` (same
+  role `identity/test-support/software-authenticator.ts` plays for
+  WebAuthn) plus route-level auth/validation tests that never call
+  Google. `npm run typecheck`, `npm run test`, and `npm run build` all
+  pass across every workspace; the migration applied clean against a
+  live local Postgres. No UI yet (session 4).
 
 ## Architecture decisions made in this scaffold
 
@@ -952,38 +1047,41 @@ UI before intelligence, mirroring how Phase 0B itself was built
    above): `connected_sources` and `messages` tables, `comms/store.ts`,
    8 tests. No UI, no real OAuth yet — that's next.
 
-2. **OAuth connection flow, first provider (Gmail). This is the next
-   session to do.** **Needs Omar**:
-   a Google Cloud project, OAuth consent screen, and client ID/secret —
-   can't be guessed at or defaulted. `POST /identity/connections/gmail/
-   {options,callback}` or equivalent, session-gated like every other
-   post-Phase-0B route. A same-day session-13 follow-up review set a
-   concrete pre-connector checklist, sharpening the one-liner above —
-   don't start this session without addressing each item, the same
-   discipline session 12's own requirement list got:
-   - encrypted token storage using real authenticated encryption (AES-GCM
-     or equivalent), not the placeholder `encrypted_token_data` column
-     session 13 left unused — this is exactly the kind of Medium-tier data
-     SECURITY.md's tiering exists for
-   - access and refresh tokens handled/rotated separately, not treated as
-     one interchangeable secret
-   - request the minimum Gmail scopes the sync actually needs, not a
-     broad grant "in case it's useful later"
-   - validate OAuth `state` on the callback (CSRF/replay protection for
-     the ceremony itself)
-   - tests proving token refresh actually works, not just initial connect
-   - a real disconnect/revocation path — a `connected_sources` row going
-     from `connected` to `disconnected` (or being deleted) must actually
-     stop future syncs from touching it, not just change a status label
-     nothing reads
+2. ~~**OAuth connection flow, first provider (Gmail)**~~ — done in
+   session 14 (see this file's header and "Completed components" above),
+   built against every item of the session-13 review's pre-connector
+   checklist: real Google Cloud credentials (Omar's own, verified against
+   Google's token endpoint before trusting them), AES-256-GCM token
+   encryption, access/refresh tokens handled separately with a refresh
+   buffer, `gmail.readonly`-only scope, `state`-validated callback,
+   token-refresh tests, and a real disconnect that clears stored tokens
+   outright. `POST /identity/connections/gmail/start`, `GET .../callback`,
+   `POST .../:sourceId/disconnect`.
 
-3. **Message sync.** Pull recent messages from a connected Gmail account,
-   normalize into `Message` rows via Session 1's schema. Background job or
-   on-demand endpoint — decide which before writing code (a genuinely open
-   design question, not one to improvise mid-session: on-demand is simpler
-   to ship and test, a background job is what "daily-driver inbox
-   aggregator" actually needs — likely on-demand first, background job as
-   a fast-follow once the sync logic itself is proven).
+3. **Message sync. This is the next session to do.** Pull recent messages
+   from a connected Gmail account (via `getActiveGmailAccessToken` from
+   session 14 — it already handles refreshing an expired token, so this
+   session shouldn't need to touch that logic), normalize into `messages`
+   rows via session 13's schema (`upsertMessage` is already idempotent on
+   `(sourceId, externalId)`, so re-syncing is safe to call repeatedly).
+   Real Gmail API calls, not fakeable the way OAuth token exchange was —
+   this session should follow session 14's own pattern: wrap the Gmail
+   API surface behind a small injectable interface (a `GmailApiClient` or
+   similar) so `comms/test-support/` gets a fake for it too, the same way
+   `FakeGoogleOAuthClient` let session 14 be tested without hitting
+   Google's real OAuth endpoints. **Open design question to resolve at the
+   start of that session, before writing code** (per RECEIPTLESS_STATE.md's
+   own convention of flagging these rather than improvising mid-session):
+   background job or on-demand endpoint — decide which before writing
+   code. On-demand is simpler to ship and test; a background job is what
+   "daily-driver inbox aggregator" actually needs long-term — likely
+   on-demand first, background job as a fast-follow once the sync logic
+   itself is proven. Also decide: how far back does an initial sync reach
+   (all mail is not realistic), and what happens to a source stuck in
+   `status: "connected"` whose access token turns out to be permanently
+   unusable (revoked outside IDent, e.g. from Google's own account
+   settings) — should a sync failure eventually flip it to an error
+   status a UI can surface, not just fail silently forever.
 
 4. **Unified inbox UI.** List/read/search messages across whatever
    sources are connected — the first user-facing surface of Phase 1.
@@ -1058,6 +1156,22 @@ None yet — there is no staging or production target. Local-only: see
   /identity/demo/high-tier-secret` sits behind the stricter
   `requireElevatedSession()` (session 12) instead — a valid base session
   alone isn't enough, it must also be currently elevated.
+- `POST /identity/connections/gmail/start` and `POST .../:sourceId/
+  disconnect` (session 14) sit behind `validateSession()` like every other
+  post-Phase-0B route, with `disconnect` additionally checking the
+  connected source's `identityId` matches the caller's before touching it.
+  `GET .../callback` is the one intentional exception — it can't carry a
+  bearer token (it's an anonymous top-level redirect from Google, not a
+  fetch from apps/web), so its equivalent gate is the single-use,
+  10-minute `oauth_state_challenges` row the `state` parameter resolves
+  to. Gmail OAuth tokens are encrypted at rest with AES-256-GCM
+  (`comms/token-encryption.ts`) before ever reaching
+  `connected_sources.encrypted_token_data`; `.env`'s real Google Cloud
+  client ID/secret follow the same gitignored-never-committed rule as
+  everything else in that file, and `COMMS_TOKEN_ENCRYPTION_KEY` currently
+  falls back to a fixed dev-only key (same convention as
+  `identity/webauthn-config.ts`'s dev defaults) — set a real one before
+  the hard gate above is ever lifted.
 - CORS (`@fastify/cors`) restricts the API to a single allowed origin
   (`identity/webauthn-config.ts`'s `ORIGIN`, defaulting to
   `http://localhost:3000` in dev) — not `origin: true`/wildcard. There's

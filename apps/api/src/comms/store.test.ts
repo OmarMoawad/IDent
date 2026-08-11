@@ -1,12 +1,20 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../app.js";
+import { db } from "../db/client.js";
+import { connectedSources } from "../db/schema.js";
 import {
+  clearConnectedSourceTokens,
+  consumeOauthStateChallenge,
+  findConnectedSourceById,
   findConnectedSourcesByIdentity,
   findMessageByIdForIdentity,
   findMessagesByIdentity,
   insertConnectedSource,
+  insertOauthStateChallenge,
+  setConnectedSourceTokens,
   upsertMessage,
 } from "./store.js";
 
@@ -212,6 +220,105 @@ describe("comms/store: messages", () => {
         occurredAt: new Date(),
       }),
     ).rejects.toThrow();
+
+    await app.close();
+  });
+});
+
+describe("comms/store: connected source token lifecycle", () => {
+  it("setConnectedSourceTokens marks a source connected", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const source = await insertConnectedSource({ identityId, provider: "gmail" });
+
+    await setConnectedSourceTokens(source.id, "opaque-encrypted-blob");
+
+    const found = await findConnectedSourceById(source.id);
+    expect(found?.status).toBe("connected");
+
+    await app.close();
+  });
+
+  it("clearConnectedSourceTokens disconnects and clears the stored tokens, not just the status", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const source = await insertConnectedSource({ identityId, provider: "gmail" });
+    await setConnectedSourceTokens(source.id, "opaque-encrypted-blob");
+
+    await clearConnectedSourceTokens(source.id);
+
+    const found = await findConnectedSourceById(source.id);
+    expect(found?.status).toBe("disconnected");
+    // ConnectedSource's own return type doesn't project encryptedTokenData
+    // (nothing outside comms/store.ts should read it unencrypted-adjacent),
+    // so confirm the clear at the row level instead.
+    const [raw] = await db
+      .select({ encryptedTokenData: connectedSources.encryptedTokenData })
+      .from(connectedSources)
+      .where(eq(connectedSources.id, source.id));
+    expect(raw.encryptedTokenData).toBeNull();
+
+    await app.close();
+  });
+});
+
+describe("comms/store: OAuth state challenges", () => {
+  it("consumes a valid, unexpired state exactly once", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const state = randomUUID();
+    await insertOauthStateChallenge({
+      identityId,
+      provider: "gmail",
+      state,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const first = await consumeOauthStateChallenge(state);
+    expect(first).toEqual({ identityId, provider: "gmail" });
+
+    const second = await consumeOauthStateChallenge(state);
+    expect(second).toBeNull();
+
+    await app.close();
+  });
+
+  it("rejects an unknown state", async () => {
+    const result = await consumeOauthStateChallenge(randomUUID());
+    expect(result).toBeNull();
+  });
+
+  it("rejects an expired state", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const state = randomUUID();
+    await insertOauthStateChallenge({
+      identityId,
+      provider: "gmail",
+      state,
+      expiresAt: new Date(Date.now() - 1000),
+    });
+
+    const result = await consumeOauthStateChallenge(state);
+    expect(result).toBeNull();
+
+    await app.close();
+  });
+
+  it("only one of two concurrent consume attempts for the same state wins", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const state = randomUUID();
+    await insertOauthStateChallenge({
+      identityId,
+      provider: "gmail",
+      state,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const [first, second] = await Promise.all([consumeOauthStateChallenge(state), consumeOauthStateChallenge(state)]);
+    const results = [first, second].filter((r) => r !== null);
+    expect(results).toHaveLength(1);
 
     await app.close();
   });

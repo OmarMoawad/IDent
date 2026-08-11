@@ -1,6 +1,6 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, gt } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { connectedSources, messages } from "../db/schema.js";
+import { connectedSources, messages, oauthStateChallenges } from "../db/schema.js";
 
 export type NewConnectedSource = {
   identityId: string;
@@ -177,4 +177,117 @@ export async function findMessageByIdForIdentity(id: string, identityId: string)
     .where(and(eq(messages.id, id), eq(messages.identityId, identityId)))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export async function findConnectedSourceById(id: string): Promise<ConnectedSource | null> {
+  const rows = await db
+    .select({
+      id: connectedSources.id,
+      identityId: connectedSources.identityId,
+      provider: connectedSources.provider,
+      status: connectedSources.status,
+      createdAt: connectedSources.createdAt,
+      updatedAt: connectedSources.updatedAt,
+    })
+    .from(connectedSources)
+    .where(eq(connectedSources.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * The one place comms/store.ts hands back the raw encrypted blob —
+ * ConnectedSource's own shape (returned everywhere else) deliberately
+ * omits it. Only comms/gmail-service.ts should call this, to decrypt and
+ * use the tokens; never surface this value from an HTTP route.
+ */
+export async function findConnectedSourceEncryptedTokenData(sourceId: string): Promise<string | null> {
+  const rows = await db
+    .select({ encryptedTokenData: connectedSources.encryptedTokenData })
+    .from(connectedSources)
+    .where(eq(connectedSources.id, sourceId))
+    .limit(1);
+  return rows[0]?.encryptedTokenData ?? null;
+}
+
+/**
+ * Stores the (already-encrypted — see token-encryption.ts) token payload
+ * for a connected source and marks it connected. The caller is
+ * responsible for encrypting; this function never sees plaintext tokens.
+ */
+export async function setConnectedSourceTokens(sourceId: string, encryptedTokenData: string): Promise<void> {
+  await db
+    .update(connectedSources)
+    .set({ encryptedTokenData, status: "connected", updatedAt: new Date() })
+    .where(eq(connectedSources.id, sourceId));
+}
+
+/**
+ * Disconnects a source by clearing its token material outright, not just
+ * flipping a status label — IDent_STATE.md's session-2 checklist calls
+ * for a disconnect that actually stops future syncs from touching it, and
+ * "no tokens stored" is a guarantee no future sync code path can
+ * accidentally ignore the way a status check could be forgotten.
+ */
+export async function clearConnectedSourceTokens(sourceId: string): Promise<void> {
+  await db
+    .update(connectedSources)
+    .set({ encryptedTokenData: null, status: "disconnected", updatedAt: new Date() })
+    .where(eq(connectedSources.id, sourceId));
+}
+
+export async function insertOauthStateChallenge(input: {
+  identityId: string;
+  provider: string;
+  state: string;
+  expiresAt: Date;
+}): Promise<void> {
+  await db.insert(oauthStateChallenges).values(input);
+}
+
+export type ConsumedOauthState = {
+  identityId: string;
+  provider: string;
+};
+
+/**
+ * Atomically resolves and consumes an OAuth state value — the *only*
+ * correlating information the callback request carries (see this table's
+ * comment in schema.ts). Consumed exactly once, whether or not the rest of
+ * the callback succeeds, so a state value can never be replayed. Mirrors
+ * identity/webauthn-store.ts's consumeChallenge shape (select the pending
+ * row, then an update guarded by the same not-yet-consumed condition, so
+ * two near-simultaneous requests for the same state can't both "win").
+ */
+export async function consumeOauthStateChallenge(state: string): Promise<ConsumedOauthState | null> {
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select({
+        id: oauthStateChallenges.id,
+        identityId: oauthStateChallenges.identityId,
+        provider: oauthStateChallenges.provider,
+      })
+      .from(oauthStateChallenges)
+      .where(
+        and(
+          eq(oauthStateChallenges.state, state),
+          isNull(oauthStateChallenges.consumedAt),
+          gt(oauthStateChallenges.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+
+    const pending = rows[0];
+    if (!pending) return null;
+
+    const updated = await tx
+      .update(oauthStateChallenges)
+      .set({ consumedAt: new Date() })
+      .where(and(eq(oauthStateChallenges.id, pending.id), isNull(oauthStateChallenges.consumedAt)))
+      .returning({ id: oauthStateChallenges.id });
+
+    if (updated.length === 0) return null; // lost the race to a concurrent consume
+
+    return { identityId: pending.identityId, provider: pending.provider };
+  });
 }

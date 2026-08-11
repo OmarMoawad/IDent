@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { HealthStatus } from "@ident/shared";
+import { registerGmailRoutes } from "./comms/gmail-routes.js";
 import { checkDbHealth } from "./db/pool.js";
 import { registerElevationRoutes } from "./identity/elevation-routes.js";
 import { registerIdentityRoutes } from "./identity/routes.js";
@@ -33,6 +34,7 @@ export function buildApp(): FastifyInstance {
   registerIdentityRoutes(app);
   registerWebauthnRoutes(app);
   registerElevationRoutes(app);
+  registerGmailRoutes(app);
 
   return app;
 }
