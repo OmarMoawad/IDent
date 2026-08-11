@@ -104,6 +104,13 @@ export const sessions = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    // Step-up state layered on top of this same base session (SECURITY.md's
+    // tiering) — not a second session/token. Null means "not elevated". Set
+    // by re-entering an existing factor (identity/elevation-routes.ts) and
+    // checked fresh against now() on every High/Critical-tier request
+    // (identity/elevation.ts's requireElevatedSession) — never trusted from
+    // a client-supplied claim.
+    elevatedUntil: timestamp("elevated_until", { withTimezone: true }),
   },
   (table) => [uniqueIndex("sessions_token_hash_idx").on(table.tokenHash)],
 );

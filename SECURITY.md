@@ -26,6 +26,19 @@ ARCHITECTURE.md.
 - **Step-up auth** (re-enter password/passkey + device-local biometric):
   required to unlock High and Critical tier modules, and expires on a much
   shorter window than the base session
+  - Built as of session 12 (see IDent_STATE.md): a distinct `elevatedUntil`
+    field layered onto the existing base session row (not a second
+    session/token), obtained by re-entering password, passkey, or recovery
+    code — `POST /identity/elevate/{password,recovery,webauthn/options,
+    webauthn/verify}` reuse the exact same verify paths login already uses.
+    A 5-minute elevation window, enforced server-side on every request via a
+    Fastify `preHandler` hook (`requireElevatedSession` in
+    `identity/elevation.ts`) — never a client-supplied trust-tier claim.
+    Device-local biometric isn't implemented — it depends on Phase 3
+    enrollment, which doesn't exist yet. No real High/Critical-tier route
+    exists to protect yet either (Phase 3+), so a synthetic demo route
+    (`GET /identity/demo/high-tier-secret`) currently proves the mechanism;
+    delete it once a real one ships.
 - No single credential decrypts every module at once — the key hierarchy in
   ARCHITECTURE.md enforces this structurally, not just as a UI gate
 

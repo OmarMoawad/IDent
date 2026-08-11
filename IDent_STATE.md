@@ -5,13 +5,63 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-11 (session 11 — real browser click-through
-verification of sessions 9 and 10's work, done by Omar himself, guided
-step by step. This is the pass both of those sessions flagged as
-outstanding (their Chrome browser-automation tool couldn't reach
-`localhost` in that environment). It surfaced **two real bugs neither
-vitest nor curl-against-the-live-API had caught**, both now fixed and
-covered by regression tests:
+Last updated: 2026-08-11 (session 12 — step-up auth / elevated sessions,
+per the pre-Phase-1 gate's last remaining item, confirmed as this
+session's starting task by a 2026-08-11 external review — see "Next
+tasks" below for the requirement list it sharpened SECURITY.md's one
+sentence into). Built exactly to that list: a distinct `elevatedUntil`
+field on the existing `sessions` row (migration
+`0006_great_the_anarchist.sql`), not a second session/token; a 5-minute
+elevation window (`session.ts`'s `ELEVATION_TTL_MS`), shorter than the
+24h base session; elevation obtained by re-entering password, passkey, or
+recovery code — `identity/service.ts`'s `elevateWithPassword`/
+`elevateWithRecoveryCode` and `identity/webauthn-service.ts`'s
+`elevateWithPasskeyAssertion` reuse the exact same verify paths
+(`verifyPassword`, the recovery-code hash check, `verifyAuthenticationResponse`)
+login already used, via a shared `verifyAssertion` extracted from
+`verifyAuthentication` rather than a second WebAuthn-verify copy; no
+client-controlled trust-tier claim — elevation status is read fresh from
+the DB on every request; enforcement is a Fastify `preHandler` hook
+(`identity/elevation.ts`'s `requireElevatedSession`), not a per-handler
+inline check a route could ship without; replay-resistant by
+construction — there's no separate elevation artifact to steal, just the
+same base session token re-checked against `sessions.elevatedUntil` server-side
+every time, past which it simply stops passing. Resolved the session's
+one open design question (a synthetic route vs. an isolated untested
+primitive) by building a demo-only `GET /identity/demo/high-tier-secret`
+guarded by the hook, since no real High/Critical-tier module exists yet
+to protect (Phase 3+) and the requirement list explicitly asks for a real
+browser click-through, which needs something real to click. New
+`identity/elevation-routes.ts` (`POST /identity/elevate/password`,
+`/recovery`, `/webauthn/options`, `/webauthn/verify`, plus the demo
+route) registered in `app.ts`; `GET /identity/me` now also returns
+`elevatedUntil`. 10 new tests (59 total): non-elevated/missing/invalid
+session rejected from the demo route, all three factors elevate
+correctly and reject when wrong, an elevated demo-route call actually
+succeeds, an *expired* elevation is rejected via `vi.useFakeTimers`
+(proving a real expiry check, not a static flag), and a logged-out
+session can't be elevated. apps/web: `/account` gained a "Step-up
+verification" section (password re-entry → elevate, plus a "View
+protected demo data" button exercising the guarded route end to end).
+`npm run typecheck`, `npm run test`, and `npm run build` all pass across
+every workspace; the migration applied clean against a live local
+Postgres. **Not yet browser-click-through-verified**: this session's
+sandboxed dev servers and the Chrome browser-automation tool's network
+turned out to be on different loopback interfaces (`curl localhost:3000`
+succeeded from the sandbox while the browser tool got a network error on
+the same URL) — the same class of gap sessions 9 and 10 hit before
+session 11 closed it manually. Needs the same treatment: Omar
+click-through-verifying step-up in a real browser next session, guided
+step by step. Once that's done, the external review's pre-Phase-1 gate is
+fully satisfied and Phase 1 can start — see "Next tasks" below.
+
+Also from session 11 (kept here as history, superseded as "current" by
+the above): real browser click-through verification of sessions 9 and
+10's work, done by Omar himself, guided step by step. This is the pass
+both of those sessions flagged as outstanding (their Chrome
+browser-automation tool couldn't reach `localhost` in that environment).
+It surfaced **two real bugs neither vitest nor curl-against-the-live-API
+had caught**, both now fixed and covered by regression tests:
 
 1. **`PUT /identity/recovery/wrap` was silently unreachable from the
    browser.** `app.ts`'s CORS registration (`app.register(cors, { origin:
@@ -124,9 +174,10 @@ session tokens, passkey credentials/signatures, and all three AMK
 wrap/unwrap paths (password, passkey/PRF, recovery code) are real — none
 of this is stubbed.
 
-Not done: step-up auth for High/Critical tier modules (see "Next tasks") —
-the only item left on the pre-Phase-1 gate an external review set in
-session 8.
+Not done: step-up auth is now built and unit-tested (session 12) but not
+yet browser-click-through-verified (see this file's header and "Next
+tasks") — that verification is the only item left on the pre-Phase-1 gate
+an external review set in session 8.
 
 ### 0A checklist status
 
@@ -346,6 +397,18 @@ read.
   (recovery-code factor and passwordless registration) are now genuinely
   browser-click-through-verified end to end, closing the gap sessions 9
   and 10 both left open.
+- Step-up auth / elevated sessions (session 12 — see this file's header
+  for the full design writeup): new `sessions.elevated_until` column
+  (migration `0006_great_the_anarchist.sql`), `POST /identity/elevate/
+  password`, `/recovery`, `/webauthn/options`, `/webauthn/verify`, and a
+  demo-only `GET /identity/demo/high-tier-secret` guarded by a new Fastify
+  `preHandler` hook (`identity/elevation.ts`'s `requireElevatedSession`).
+  10 new tests (59 total in the API workspace) in
+  `identity/elevation.test.ts`. `npm run typecheck`, `npm run test`, and
+  `npm run build` all pass across every workspace; the migration applied
+  clean against a live local Postgres. apps/web's `/account` gained a
+  "Step-up verification" section. **Not yet browser-click-through-verified
+  — see this file's header for why and what's needed next.**
 
 ## Architecture decisions made in this scaffold
 
@@ -678,12 +741,13 @@ block Phase 0B and none should be designed now:
   per-module (vault shares, biometric payment authorizations) but has no
   first-class, tamper-evident, cross-module design yet. Worth doing once
   enough modules exist to need a shared retention/query story.
-- **Step-up auth / elevated sessions** (Phase 3+, per SECURITY.md's
-  tiering) — the base session built this slice unlocks Low/Medium tier
-  modules only; High/Critical need a second, shorter-lived elevated session
-  layered on top (re-enter password/passkey + device-local biometric).
-  Not designed yet beyond that one sentence in SECURITY.md. Needed before
-  any High/Critical-tier module (Phase 3+) ships a write path.
+- ~~**Step-up auth / elevated sessions**~~ — built and unit-tested as of
+  session 12 (real-browser click-through still pending, see "Next tasks"),
+  device-local biometric excluded since Phase 3 enrollment doesn't exist
+  yet. See this file's header and "Completed components" above for the
+  full design. The only thing still deferred to Phase 3+ is a *real*
+  High/Critical-tier route to actually guard with it — today's demo route
+  is a stand-in (see "Next tasks").
 - ~~**Passwordless registration**~~ — done as of session 10. A passkey no
   longer needs a password-holding identity to attach to;
   `/identity/webauthn/register-identity/{options,verify}` create one from
@@ -717,54 +781,46 @@ not just passkey login, plus the recovery-path and step-up items below.
 session 8. Recovery-path and passwordless registration were completed in
 sessions 9 and 10 and **click-through-verified in session 11** — which
 also found and fixed two real bugs the verification pass exists to catch
-(see this file's header). Step-up auth, below, is now the only item left
-on this gate.)
+(see this file's header). Step-up auth was built and unit-tested in
+session 12 against every item of the requirement list a 2026-08-11
+external review set — see this file's header for the full design writeup
+and "Completed components" above for what shipped. Its real-browser
+click-through, below, is now the only item left on this gate.)
 
-1. **Step-up auth / elevated sessions for High/Critical tier modules —
-   confirmed 2026-08-11 as the next session's starting task**, per a
-   second external review of this repo (2026-08-11) that read the actual
-   source (not just this file) and independently confirmed session 11's
-   fixes and the 49-passing-tests/green-CI claims. Not needed until a
-   Phase 3+ module ships a write path, but the base-session/elevated-
-   session split is easier to add before any module depends on "one
-   session tier" than after. Once this is done, the external review's
-   pre-Phase-1 gate is fully satisfied and Phase 1 can start.
+1. **Browser-click-through-verify step-up auth, guided, the same way
+   session 11 verified sessions 9 and 10's work.** Session 12 built and
+   unit-tested every item of the 2026-08-11 external review's requirement
+   list (distinct elevated-session state, explicit shorter-than-base-session
+   expiry, elevation via password/passkey/recovery re-entry reusing
+   existing verify paths, no client-controlled trust-tier claims,
+   route/middleware-level enforcement, replay-resistance, non-elevated-
+   session-rejected and expired-elevation-rejected tests) but could not do
+   the review's last requirement — a real-browser click-through — itself
+   this session: the sandboxed dev servers and the Chrome
+   browser-automation tool turned out to be on different loopback
+   interfaces (`curl localhost:3000` succeeded from the sandbox shell while
+   the browser tool got a network error on the same URL), the same class of
+   gap sessions 9 and 10 hit before session 11 closed it manually. Walk
+   through, in a real browser against `npm run dev:api` + `npm run dev:web`:
+   register or log in → on `/account`, confirm "View protected demo data"
+   is denied (session not elevated) → re-enter the password under "Step-up
+   verification" → confirm the same button now succeeds → optionally also
+   try the recovery-code and passkey elevation paths (`POST
+   /identity/elevate/recovery`, `/webauthn/options` + `/webauthn/verify` —
+   no dedicated UI for those two yet, curl or a REST client is fine) → wait
+   past the 5-minute `ELEVATION_TTL_MS` window (or temporarily shrink it
+   for the test) and confirm the button is denied again. Fix anything the
+   click-through catches, the way session 11 did. Once this is done, the
+   external review's pre-Phase-1 gate is fully satisfied and Phase 1 can
+   start.
 
-   `SECURITY.md`'s current spec is one sentence ("re-enter password/
-   passkey + device-local biometric... expires on a much shorter window
-   than the base session"). The 2026-08-11 review sharpened this into a
-   concrete requirement list to build against — device-local biometric is
-   correctly *not* on it, since that depends on Phase 3 enrollment, which
-   doesn't exist yet:
-   - a distinct elevated-session state layered on top of the existing base
-     session, not a new session type that replaces it
-   - explicit elevation expiry, shorter than the base session's 24h TTL
-   - elevation obtained by re-entering an existing factor (password,
-     passkey, or recovery code) — reuses session.ts's existing verify
-     paths, doesn't invent a new one
-   - no client-controlled trust-tier claims — the server decides whether a
-     request needs elevation and whether the presented session has it,
-     never a client-supplied flag
-   - server-side enforcement at the route/middleware level, not a
-     per-handler opt-in that's easy to forget
-   - replay-resistant elevation (an elevation proof shouldn't itself be
-     stealable and reusable past its expiry)
-   - tests proving a normal (non-elevated) session is rejected from a
-     High/Critical-tier route
-   - tests proving an *expired* elevated session is rejected, not silently
-     treated as still-elevated
-   - real-browser click-through verification, per session 11's standard —
-     not just vitest
-
-   **Open design question to resolve at the start of that session, before
-   writing code:** no High/Critical-tier module exists yet (those are
-   Phase 3+), so "a route that requires elevation" has no real consumer to
-   test against. Two options: (a) build the elevation primitive/middleware
-   fully unit-tested in isolation, with no route using it yet, or (b) add
-   one synthetic demo-only protected route purely to prove the mechanism
-   end-to-end (including the browser click-through, which needs something
-   real to click). Decide which before implementing — don't improvise it
-   mid-session.
+2. **Delete the synthetic demo route** (`GET
+   /identity/demo/high-tier-secret`, `identity/elevation-routes.ts`) once a
+   real High/Critical-tier module (Phase 3+) ships a route that can carry
+   the "prove elevation is enforced" burden instead — it exists only
+   because session 12 had nothing real to guard yet. Not urgent; do it
+   alongside whichever Phase 3+ slice adds the first real one, not as a
+   standalone cleanup pass.
 
 ## Deployment instructions
 
@@ -793,7 +849,13 @@ None yet — there is no staging or production target. Local-only: see
   from Phase 0B onward that isn't itself part of registration/login must
   sit behind `validateSession()` — Phase 0A's old "no second route without
   auth" rule now has a concrete mechanism to enforce it with.
-  `GET /identity/amk-wrap` follows the same rule.
+  `GET /identity/amk-wrap` follows the same rule. `POST /identity/elevate/
+  {password,recovery,webauthn/options,webauthn/verify}` also sit behind
+  `validateSession()` (a valid *base* session is required just to attempt
+  step-up) plus their own factor re-verification; `GET
+  /identity/demo/high-tier-secret` sits behind the stricter
+  `requireElevatedSession()` (session 12) instead — a valid base session
+  alone isn't enough, it must also be currently elevated.
 - CORS (`@fastify/cors`) restricts the API to a single allowed origin
   (`identity/webauthn-config.ts`'s `ORIGIN`, defaulting to
   `http://localhost:3000` in dev) — not `origin: true`/wildcard. There's

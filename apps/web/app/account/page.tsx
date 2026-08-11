@@ -30,6 +30,13 @@ export default function AccountPage() {
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
+  const [stepUpPassword, setStepUpPassword] = useState("");
+  const [elevating, setElevating] = useState(false);
+  const [elevateError, setElevateError] = useState<string | null>(null);
+  const [elevatedUntil, setElevatedUntil] = useState<string | null>(null);
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [demoResult, setDemoResult] = useState<string | null>(null);
+  const [demoError, setDemoError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!restoring && !auth) router.replace("/login");
@@ -177,6 +184,49 @@ export default function AccountPage() {
     }
   }
 
+  // Step-up / elevated sessions (SECURITY.md's tiering): re-entering the
+  // password proves it's still you and unlocks the demo High/Critical-tier
+  // route below for a few minutes — see apps/api's identity/elevation.ts.
+  // No real High/Critical module exists yet (those are Phase 3+), so the
+  // demo route is the only thing this can currently unlock.
+  async function handleElevate(event: FormEvent) {
+    event.preventDefault();
+    setElevateError(null);
+    setDemoResult(null);
+    setDemoError(null);
+    setElevating(true);
+    try {
+      const result = await apiPost<{ elevatedUntil: string }>(
+        "/identity/elevate/password",
+        { password: stepUpPassword },
+        auth?.sessionToken,
+      );
+      setElevatedUntil(result.elevatedUntil);
+      setStepUpPassword("");
+    } catch (err) {
+      setElevateError(err instanceof ApiError ? err.message : "Could not verify password for step-up.");
+    } finally {
+      setElevating(false);
+    }
+  }
+
+  async function handleViewDemoSecret() {
+    setDemoError(null);
+    setDemoResult(null);
+    setDemoLoading(true);
+    try {
+      const result = await apiGet<{ secret: string }>("/identity/demo/high-tier-secret", auth?.sessionToken);
+      setDemoResult(result.secret);
+    } catch (err) {
+      // A 403 here (session valid but not elevated, or elevation expired)
+      // is the expected outcome before/after step-up, not a bug — shown as
+      // plain status text, not an alert.
+      setDemoError(err instanceof ApiError ? err.message : "Could not reach the demo route.");
+    } finally {
+      setDemoLoading(false);
+    }
+  }
+
   return (
     <main>
       <h1>Account</h1>
@@ -222,6 +272,42 @@ export default function AccountPage() {
         </p>
       )}
       {recoveryStatus && <p>{recoveryStatus}</p>}
+
+      <h2>Step-up verification</h2>
+      <p>
+        Some actions need proof it&apos;s still you, on top of being logged in. Re-enter your password to
+        elevate this session for a few minutes.
+      </p>
+      <dl>
+        <dt>Elevated</dt>
+        <dd>
+          {elevatedUntil && new Date(elevatedUntil).getTime() > Date.now()
+            ? `Yes, until ${new Date(elevatedUntil).toLocaleTimeString()}`
+            : "No"}
+        </dd>
+      </dl>
+      <form onSubmit={handleElevate}>
+        <label>
+          Password
+          <input
+            type="password"
+            value={stepUpPassword}
+            onChange={(event) => setStepUpPassword(event.target.value)}
+            required
+            autoComplete="current-password"
+          />
+        </label>
+        {elevateError && <p role="alert">{elevateError}</p>}
+        <button type="submit" disabled={elevating}>
+          {elevating ? "Verifying…" : "Elevate session"}
+        </button>
+      </form>
+      <button type="button" onClick={handleViewDemoSecret} disabled={demoLoading}>
+        {demoLoading ? "Loading…" : "View protected demo data"}
+      </button>
+      {demoResult && <p>{demoResult}</p>}
+      {demoError && <p role="alert">{demoError}</p>}
+
       <button type="button" onClick={handleLogout} disabled={loggingOut}>
         {loggingOut ? "Logging out…" : "Log out"}
       </button>

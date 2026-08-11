@@ -9,6 +9,12 @@ const TOKEN_BYTES = 32;
 // one; revisit once multi-device UX needs silent renewal.
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24;
 
+// Step-up / elevated-session window (SECURITY.md's tiering): re-entering a
+// factor unlocks High/Critical-tier routes for this long, much shorter than
+// the 24h base session. Not a separate token — see sessions.elevatedUntil
+// in db/schema.ts and identity/elevation.ts's requireElevatedSession.
+export const ELEVATION_TTL_MS = 1000 * 60 * 5;
+
 export function generateSessionToken(): string {
   return randomBytes(TOKEN_BYTES).toString("base64url");
 }

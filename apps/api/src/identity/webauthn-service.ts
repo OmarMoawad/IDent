@@ -15,8 +15,15 @@ import type {
 } from "@simplewebauthn/server";
 import { hashPassword } from "./password.js";
 import { generateRecoveryCode as generateRecoveryCodeValue, normalizeRecoveryCode } from "./recovery-code.js";
-import { assertValidUsername, issueSession, type Session } from "./service.js";
-import { findIdentityByUsername } from "./store.js";
+import {
+  ElevationVerificationError,
+  type AuthenticatedIdentity,
+  assertValidUsername,
+  issueSession,
+  type Session,
+} from "./service.js";
+import { ELEVATION_TTL_MS } from "./session.js";
+import { elevateSessionById, findIdentityByUsername } from "./store.js";
 import { CHALLENGE_TTL_MS, ORIGIN, RP_ID, RP_NAME, getPrfSaltBase64Url } from "./webauthn-config.js";
 import {
   consumeChallenge,
@@ -275,10 +282,19 @@ export async function getAuthenticationOptions(username: string): Promise<Public
   return options;
 }
 
-export async function verifyAuthentication(
+/**
+ * The core of a passkey authentication ceremony — verify the signed
+ * assertion against the challenge this server issued and the stored
+ * public key, then advance the counter. Shared by login (verifyAuthentication,
+ * which turns a successful result into a brand-new session) and step-up
+ * (elevateWithPasskeyAssertion, which turns one into an elevation of the
+ * *existing* session instead) so there's exactly one place that verifies a
+ * passkey assertion, not two copies drifting apart.
+ */
+async function verifyAssertion(
   username: string,
   response: AuthenticationResponseJSON,
-): Promise<Session> {
+): Promise<{ identityId: string; username: string }> {
   const identity = await findIdentityByUsername(username);
   if (!identity) throw new UnknownUsernameError();
 
@@ -310,7 +326,42 @@ export async function verifyAuthentication(
 
   await updateCredentialCounter(stored.id, verification.authenticationInfo.newCounter);
 
+  return { identityId: identity.identityId, username: identity.username };
+}
+
+export async function verifyAuthentication(
+  username: string,
+  response: AuthenticationResponseJSON,
+): Promise<Session> {
+  const identity = await verifyAssertion(username, response);
   return issueSession(identity.identityId, identity.username);
+}
+
+/**
+ * Step-up counterpart to verifyAuthentication: re-verifies a passkey
+ * assertion the same way a passkey login does (verifyAssertion above), but
+ * elevates the caller's *existing* session instead of issuing a new one.
+ * Always asserts against `identity.username` — the already-authenticated
+ * identity from the caller's bearer session, never a username the client
+ * could supply separately — so this can only ever elevate with that same
+ * identity's own passkey, not borrow a different account's credential.
+ * Every failure mode (unknown username — unreachable in practice since
+ * identity.username is already a real, logged-in identity;
+ * expired/replayed challenge; wrong credential; bad signature) collapses to
+ * ElevationVerificationError, the same "step-up denied" outcome
+ * elevation-routes.ts already handles for the password/recovery factors.
+ */
+export async function elevateWithPasskeyAssertion(
+  identity: Pick<AuthenticatedIdentity, "sessionId" | "username">,
+  response: AuthenticationResponseJSON,
+): Promise<Date> {
+  await verifyAssertion(identity.username, response).catch(() => {
+    throw new ElevationVerificationError();
+  });
+
+  const elevatedUntil = new Date(Date.now() + ELEVATION_TTL_MS);
+  await elevateSessionById(identity.sessionId, elevatedUntil);
+  return elevatedUntil;
 }
 
 /**

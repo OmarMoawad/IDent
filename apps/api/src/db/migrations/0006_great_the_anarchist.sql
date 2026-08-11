@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "elevated_until" timestamp with time zone;

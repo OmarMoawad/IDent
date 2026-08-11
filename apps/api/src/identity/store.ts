@@ -179,6 +179,7 @@ export type ActiveSession = {
   sessionId: string;
   identityId: string;
   username: string;
+  elevatedUntil: Date | null;
 };
 
 export async function findActiveSessionByTokenHash(tokenHash: string): Promise<ActiveSession | null> {
@@ -187,6 +188,7 @@ export async function findActiveSessionByTokenHash(tokenHash: string): Promise<A
       sessionId: sessions.id,
       identityId: sessions.identityId,
       username: usernameAliases.username,
+      elevatedUntil: sessions.elevatedUntil,
     })
     .from(sessions)
     .innerJoin(usernameAliases, eq(usernameAliases.identityId, sessions.identityId))
@@ -202,4 +204,18 @@ export async function revokeSessionByTokenHash(tokenHash: string): Promise<void>
     .update(sessions)
     .set({ revokedAt: new Date() })
     .where(and(eq(sessions.tokenHash, tokenHash), isNull(sessions.revokedAt)));
+}
+
+/**
+ * Elevates an existing base session in place (SECURITY.md's tiering) —
+ * never creates a new session/token. Guarded by the same revoked/expired
+ * check as findActiveSessionByTokenHash so a dead base session can't be
+ * elevated back into validity by racing a factor re-verification against
+ * its own expiry/logout.
+ */
+export async function elevateSessionById(sessionId: string, elevatedUntil: Date): Promise<void> {
+  await db
+    .update(sessions)
+    .set({ elevatedUntil })
+    .where(and(eq(sessions.id, sessionId), isNull(sessions.revokedAt), gt(sessions.expiresAt, new Date())));
 }

@@ -121,7 +121,7 @@ describe("GET /identity/me", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ identityId, username: body.username });
+    expect(response.json()).toEqual({ identityId, username: body.username, elevatedUntil: null });
 
     await app.close();
   });

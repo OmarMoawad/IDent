@@ -116,7 +116,11 @@ export function registerIdentityRoutes(app: FastifyInstance): void {
     const identity = token ? await validateSession(token) : null;
     if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
 
-    return reply.code(200).send({ identityId: identity.identityId, username: identity.username });
+    return reply.code(200).send({
+      identityId: identity.identityId,
+      username: identity.username,
+      elevatedUntil: identity.elevatedUntil ? identity.elevatedUntil.toISOString() : null,
+    });
   });
 
   app.get<{ Querystring: AmkWrapQuery }>("/identity/amk-wrap", async (request, reply) => {

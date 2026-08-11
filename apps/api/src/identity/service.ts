@@ -1,9 +1,10 @@
 import { hashPassword, verifyPassword } from "./password.js";
 import { generateRecoveryCode as generateRecoveryCodeValue, normalizeRecoveryCode } from "./recovery-code.js";
-import { SESSION_TTL_MS, generateSessionToken, hashSessionToken } from "./session.js";
+import { ELEVATION_TTL_MS, SESSION_TTL_MS, generateSessionToken, hashSessionToken } from "./session.js";
 import {
   UsernameTakenError,
   createIdentity,
+  elevateSessionById,
   findActiveSessionByTokenHash,
   findAmkWrap,
   findIdentityByUsername,
@@ -27,6 +28,20 @@ export class InvalidRecoveryCodeError extends Error {
   constructor() {
     super("Invalid username or recovery code.");
     this.name = "InvalidRecoveryCodeError";
+  }
+}
+
+/**
+ * Thrown by the elevate* functions below when the re-entered factor doesn't
+ * match the *already-authenticated* identity's own credential — distinct
+ * from InvalidCredentialsError/InvalidRecoveryCodeError (which cover "who
+ * are you") because here identity is already established by the bearer
+ * session; this only answers "prove it's still you" for step-up.
+ */
+export class ElevationVerificationError extends Error {
+  constructor(reason = "Could not verify that factor. Step-up not granted.") {
+    super(reason);
+    this.name = "ElevationVerificationError";
   }
 }
 
@@ -123,6 +138,7 @@ export type AuthenticatedIdentity = {
   sessionId: string;
   identityId: string;
   username: string;
+  elevatedUntil: Date | null;
 };
 
 /**
@@ -137,6 +153,47 @@ export async function validateSession(sessionToken: string): Promise<Authenticat
 
 export async function logout(sessionToken: string): Promise<void> {
   await revokeSessionByTokenHash(hashSessionToken(sessionToken));
+}
+
+/**
+ * Re-verifies the password factor for an *already-authenticated* identity
+ * (the caller must have validated the bearer session first — see
+ * elevation-routes.ts) and, on success, elevates that same session in
+ * place. Reuses loginWithPassword's exact verify path (findIdentityByUsername
+ * + verifyPassword + the timing-safe dummy-hash fallback) rather than
+ * inventing a second one, per IDent_STATE.md's step-up requirement list.
+ */
+export async function elevateWithPassword(
+  identity: Pick<AuthenticatedIdentity, "sessionId" | "username">,
+  password: string,
+): Promise<Date> {
+  const record = await findIdentityByUsername(identity.username);
+  const passwordHash = record?.passwordHash ?? (await getDummyHash());
+  const valid = await verifyPassword(password, passwordHash);
+  if (!record || !valid) throw new ElevationVerificationError();
+
+  const elevatedUntil = new Date(Date.now() + ELEVATION_TTL_MS);
+  await elevateSessionById(identity.sessionId, elevatedUntil);
+  return elevatedUntil;
+}
+
+/**
+ * Same shape as elevateWithPassword but for the recovery-code factor —
+ * reuses loginWithRecoveryCode's exact verify path (codeHash lookup +
+ * verifyPassword + dummy-hash timing safety), never a second copy of it.
+ */
+export async function elevateWithRecoveryCode(
+  identity: Pick<AuthenticatedIdentity, "sessionId" | "username">,
+  recoveryCode: string,
+): Promise<Date> {
+  const record = await findRecoveryCredentialByUsername(identity.username);
+  const codeHash = record?.codeHash ?? (await getDummyRecoveryHash());
+  const valid = await verifyPassword(normalizeRecoveryCode(recoveryCode), codeHash);
+  if (!record || !valid) throw new ElevationVerificationError();
+
+  const elevatedUntil = new Date(Date.now() + ELEVATION_TTL_MS);
+  await elevateSessionById(identity.sessionId, elevatedUntil);
+  return elevatedUntil;
 }
 
 /**
