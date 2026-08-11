@@ -241,14 +241,24 @@ export const connectedSources = pgTable(
     identityId: uuid("identity_id")
       .notNull()
       .references(() => identities.id, { onDelete: "cascade" }),
-    // e.g. "gmail" — no real provider integration exists yet (a later Phase 1
-    // session wires up actual OAuth), so nothing currently populates this
-    // beyond test/seed data.
+    // e.g. "gmail" — session 14 wired up the real Gmail connector.
     provider: text("provider").notNull(),
     status: text("status").notNull().default("pending"),
-    // Opaque, encrypted-at-rest ciphertext once a real OAuth connector exists
-    // — this column exists now so the schema shape doesn't change again when
-    // that lands, but nothing writes to it yet. Never a plaintext token.
+    // The provider's own stable account identifier — for Gmail this is the
+    // mailbox's email address (Gmail API's users.getProfile), fetched once
+    // right after token exchange (session 14.5, see gmail-service.ts's
+    // completeGmailConnection). Nullable because a "pending"
+    // never-completed row (or old test/seed data) has no real provider
+    // account behind it yet. Without this, nothing distinguishes three
+    // separate Gmail connections from three redundant connections to the
+    // *same* mailbox — see the unique index below.
+    providerAccountId: text("provider_account_id"),
+    // Human-readable form of the same identity (for Gmail, identical to
+    // providerAccountId today) — kept as its own column since a future
+    // provider's stable ID and its display-friendly label won't
+    // necessarily be the same string.
+    providerAccountEmail: text("provider_account_email"),
+    // Opaque, encrypted-at-rest ciphertext — never a plaintext token.
     encryptedTokenData: text("encrypted_token_data"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -261,6 +271,17 @@ export const connectedSources = pgTable(
     // belongs to" as one constraint, not two independently-true ones. See
     // that foreign key's comment for why this needs to exist.
     unique("connected_sources_id_identity_id_key").on(table.id, table.identityId),
+    // Reconnecting the same Gmail account should update the existing row,
+    // never silently create a duplicate — see gmail-service.ts's
+    // completeGmailConnection. NULLs (a pending/never-completed row) don't
+    // collide with each other under Postgres unique-index semantics, so
+    // this only actually constrains rows that reached a real provider
+    // account.
+    unique("connected_sources_identity_provider_account_key").on(
+      table.identityId,
+      table.provider,
+      table.providerAccountId,
+    ),
   ],
 );
 
@@ -347,6 +368,14 @@ export const oauthStateChallenges = pgTable(
       .references(() => identities.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
     state: text("state").notNull(),
+    // PKCE (session 14.5): the random verifier this same request's
+    // authorization URL committed to via a SHA-256 code_challenge —
+    // consumed alongside state at code-exchange time and sent to Google
+    // as code_verifier, so a stolen authorization code is useless without
+    // it too. Standard hardening for a public redirect step even though
+    // this is a confidential (client-secret-holding) client — see
+    // gmail-service.ts's startGmailConnection/completeGmailConnection.
+    pkceVerifier: text("pkce_verifier").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),

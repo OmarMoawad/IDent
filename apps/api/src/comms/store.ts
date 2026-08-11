@@ -6,6 +6,8 @@ export type NewConnectedSource = {
   identityId: string;
   provider: string;
   status?: string;
+  providerAccountId?: string;
+  providerAccountEmail?: string;
 };
 
 export type ConnectedSource = {
@@ -13,22 +15,34 @@ export type ConnectedSource = {
   identityId: string;
   provider: string;
   status: string;
+  providerAccountId: string | null;
+  providerAccountEmail: string | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+const connectedSourceColumns = {
+  id: connectedSources.id,
+  identityId: connectedSources.identityId,
+  provider: connectedSources.provider,
+  status: connectedSources.status,
+  providerAccountId: connectedSources.providerAccountId,
+  providerAccountEmail: connectedSources.providerAccountEmail,
+  createdAt: connectedSources.createdAt,
+  updatedAt: connectedSources.updatedAt,
 };
 
 export async function insertConnectedSource(input: NewConnectedSource): Promise<ConnectedSource> {
   const [row] = await db
     .insert(connectedSources)
-    .values({ identityId: input.identityId, provider: input.provider, status: input.status ?? "pending" })
-    .returning({
-      id: connectedSources.id,
-      identityId: connectedSources.identityId,
-      provider: connectedSources.provider,
-      status: connectedSources.status,
-      createdAt: connectedSources.createdAt,
-      updatedAt: connectedSources.updatedAt,
-    });
+    .values({
+      identityId: input.identityId,
+      provider: input.provider,
+      status: input.status ?? "pending",
+      providerAccountId: input.providerAccountId,
+      providerAccountEmail: input.providerAccountEmail,
+    })
+    .returning(connectedSourceColumns);
   return row;
 }
 
@@ -38,17 +52,33 @@ export async function insertConnectedSource(input: NewConnectedSource): Promise<
  * per-identity query in this codebase (e.g. identity/store.ts's AMK wraps).
  */
 export async function findConnectedSourcesByIdentity(identityId: string): Promise<ConnectedSource[]> {
-  return db
-    .select({
-      id: connectedSources.id,
-      identityId: connectedSources.identityId,
-      provider: connectedSources.provider,
-      status: connectedSources.status,
-      createdAt: connectedSources.createdAt,
-      updatedAt: connectedSources.updatedAt,
-    })
+  return db.select(connectedSourceColumns).from(connectedSources).where(eq(connectedSources.identityId, identityId));
+}
+
+/**
+ * Looks up an existing connection to the same real-world provider account
+ * (see connected_sources_identity_provider_account_key in schema.ts) so
+ * reconnecting the same Gmail mailbox updates that row instead of
+ * creating a redundant duplicate — see gmail-service.ts's
+ * completeGmailConnection.
+ */
+export async function findConnectedSourceByProviderAccount(
+  identityId: string,
+  provider: string,
+  providerAccountId: string,
+): Promise<ConnectedSource | null> {
+  const rows = await db
+    .select(connectedSourceColumns)
     .from(connectedSources)
-    .where(eq(connectedSources.identityId, identityId));
+    .where(
+      and(
+        eq(connectedSources.identityId, identityId),
+        eq(connectedSources.provider, provider),
+        eq(connectedSources.providerAccountId, providerAccountId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 export type NewMessage = {
@@ -180,18 +210,7 @@ export async function findMessageByIdForIdentity(id: string, identityId: string)
 }
 
 export async function findConnectedSourceById(id: string): Promise<ConnectedSource | null> {
-  const rows = await db
-    .select({
-      id: connectedSources.id,
-      identityId: connectedSources.identityId,
-      provider: connectedSources.provider,
-      status: connectedSources.status,
-      createdAt: connectedSources.createdAt,
-      updatedAt: connectedSources.updatedAt,
-    })
-    .from(connectedSources)
-    .where(eq(connectedSources.id, id))
-    .limit(1);
+  const rows = await db.select(connectedSourceColumns).from(connectedSources).where(eq(connectedSources.id, id)).limit(1);
   return rows[0] ?? null;
 }
 
@@ -240,6 +259,7 @@ export async function insertOauthStateChallenge(input: {
   identityId: string;
   provider: string;
   state: string;
+  pkceVerifier: string;
   expiresAt: Date;
 }): Promise<void> {
   await db.insert(oauthStateChallenges).values(input);
@@ -248,6 +268,7 @@ export async function insertOauthStateChallenge(input: {
 export type ConsumedOauthState = {
   identityId: string;
   provider: string;
+  pkceVerifier: string;
 };
 
 /**
@@ -266,6 +287,7 @@ export async function consumeOauthStateChallenge(state: string): Promise<Consume
         id: oauthStateChallenges.id,
         identityId: oauthStateChallenges.identityId,
         provider: oauthStateChallenges.provider,
+        pkceVerifier: oauthStateChallenges.pkceVerifier,
       })
       .from(oauthStateChallenges)
       .where(
@@ -288,6 +310,6 @@ export async function consumeOauthStateChallenge(state: string): Promise<Consume
 
     if (updated.length === 0) return null; // lost the race to a concurrent consume
 
-    return { identityId: pending.identityId, provider: pending.provider };
+    return { identityId: pending.identityId, provider: pending.provider, pkceVerifier: pending.pkceVerifier };
   });
 }

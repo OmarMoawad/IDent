@@ -31,10 +31,18 @@ export type RefreshedTokens = {
  * plays for WebAuthn: real business logic, no real third party involved).
  */
 export interface GoogleOAuthClient {
-  getAuthorizationUrl(state: string): string;
-  exchangeCodeForTokens(code: string): Promise<ExchangedTokens>;
+  getAuthorizationUrl(state: string, codeChallenge: string): string;
+  exchangeCodeForTokens(code: string, codeVerifier: string): Promise<ExchangedTokens>;
   refreshAccessToken(refreshToken: string): Promise<RefreshedTokens>;
   revokeToken(token: string): Promise<void>;
+  /**
+   * The provider's stable identifier for the account that was just
+   * connected — for Gmail, the mailbox's own email address (session
+   * 14.5). Without this, connected_sources can't tell three separate
+   * Gmail connections apart from three redundant connections to the same
+   * mailbox — see that table's comment in schema.ts.
+   */
+  getAccountEmail(accessToken: string): Promise<string>;
 }
 
 export class GoogleOAuthError extends Error {
@@ -47,6 +55,11 @@ export class GoogleOAuthError extends Error {
 const AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
+// Gmail API's own profile endpoint, not the generic OAuth userinfo one —
+// returns the connected mailbox's address without needing to request any
+// scope beyond gmail.readonly (an /oauth2/userinfo call would need its
+// own "email" scope grant on top of what this connector already asks for).
+const GMAIL_PROFILE_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
 
 type TokenEndpointBody = {
   access_token?: string;
@@ -70,7 +83,7 @@ async function postToTokenEndpoint(params: Record<string, string>): Promise<Toke
 }
 
 export class RealGoogleOAuthClient implements GoogleOAuthClient {
-  getAuthorizationUrl(state: string): string {
+  getAuthorizationUrl(state: string, codeChallenge: string): string {
     const params = new URLSearchParams({
       client_id: GOOGLE_OAUTH_CLIENT_ID,
       redirect_uri: GOOGLE_OAUTH_REDIRECT_URI,
@@ -83,17 +96,25 @@ export class RealGoogleOAuthClient implements GoogleOAuthClient {
       access_type: "offline",
       prompt: "consent",
       state,
+      // PKCE (session 14.5) — this client is confidential (holds a client
+      // secret), so PKCE isn't covering for a missing secret the way it
+      // does for a public/mobile client; it's defense-in-depth against an
+      // authorization code being intercepted or logged somewhere between
+      // Google's redirect and this server's callback handler.
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
     });
     return `${AUTHORIZATION_ENDPOINT}?${params.toString()}`;
   }
 
-  async exchangeCodeForTokens(code: string): Promise<ExchangedTokens> {
+  async exchangeCodeForTokens(code: string, codeVerifier: string): Promise<ExchangedTokens> {
     const body = await postToTokenEndpoint({
       code,
       client_id: GOOGLE_OAUTH_CLIENT_ID,
       client_secret: GOOGLE_OAUTH_CLIENT_SECRET,
       redirect_uri: GOOGLE_OAUTH_REDIRECT_URI,
       grant_type: "authorization_code",
+      code_verifier: codeVerifier,
     });
     return {
       accessToken: body.access_token!,
@@ -126,6 +147,17 @@ export class RealGoogleOAuthClient implements GoogleOAuthClient {
     if (!response.ok) {
       throw new GoogleOAuthError("Could not revoke token with Google.");
     }
+  }
+
+  async getAccountEmail(accessToken: string): Promise<string> {
+    const response = await fetch(GMAIL_PROFILE_ENDPOINT, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    const body = (await response.json().catch(() => null)) as { emailAddress?: string } | null;
+    if (!response.ok || !body?.emailAddress) {
+      throw new GoogleOAuthError("Could not fetch the connected Gmail account's profile.");
+    }
+    return body.emailAddress;
   }
 }
 

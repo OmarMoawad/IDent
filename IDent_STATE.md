@@ -81,6 +81,69 @@ that's session 4 ("Unified inbox UI") per the Phase 1 cadence; for now
 `POST /identity/connections/gmail/start` has to be called directly (curl
 or a REST client) to get a real authorization URL to visit.
 
+**Same-day follow-up (2026-08-11, "session 14.5"):** an external review of
+session 14 confirmed everything above but found two real gaps worth
+closing before session 15's message sync starts writing real data, plus
+flagged that the connector still isn't proven against a real Google
+account (see below — that part stays open).
+
+1. **PKCE (RFC 7636), previously missing.** This is a confidential client
+   (holds a client secret), so PKCE isn't compensating for a missing
+   secret the way it does for a public/mobile client — it's defense in
+   depth against an authorization code being intercepted between
+   Google's redirect and this server's callback. `oauth_state_challenges`
+   gained a `pkce_verifier` column (migration `0010_jazzy_violations.sql`);
+   `startGmailConnection` generates a fresh verifier + SHA-256
+   `code_challenge` per attempt and stores the verifier alongside `state`;
+   `getAuthorizationUrl` now sends `code_challenge`/
+   `code_challenge_method=S256`; `completeGmailConnection` sends the
+   matching `code_verifier` at exchange time. New tests: `google-oauth-
+   client.test.ts` proves the real client's URL actually carries the PKCE
+   params (pure, no network needed), and `gmail-service.test.ts` proves
+   the verifier that reaches token exchange is genuinely the one the
+   challenge was derived from (recomputes SHA-256 and compares), not just
+   "some verifier."
+2. **Gmail account identity, previously not persisted.**
+   `connected_sources` had `identityId + provider + status + encrypted
+   tokens` but nothing recording *which* Gmail mailbox — three separate
+   connections and three redundant reconnections to the same mailbox were
+   indistinguishable. Fixed: new `providerAccountId`/`providerAccountEmail`
+   columns, fetched from Gmail's own `users.getProfile` endpoint right
+   after token exchange (no extra OAuth scope needed — it's part of the
+   `gmail.readonly` surface already granted, unlike the generic OAuth
+   userinfo endpoint, which would need its own `email` scope).  A unique
+   `(identityId, provider, providerAccountId)` index means reconnecting
+   the same mailbox updates the existing row's tokens instead of
+   duplicating it — `completeGmailConnection` now checks for an existing
+   match first. New tests cover reconnect-updates-not-duplicates (with
+   fresh tokens actually landing in the existing row) and that two
+   different identities connecting the *same* Gmail account correctly get
+   two independent rows (isolation, not deduplication, across identities).
+   Required truncating local dev's `oauth_state_challenges` table by hand
+   before migrating — adding a `NOT NULL` column to a table with leftover
+   rows from repeated local test runs fails otherwise; CI's ephemeral
+   database never hits this since it starts empty every run.
+
+10 more tests (111 total in the API workspace — one `identity/
+password.test.ts` failure on the first full run turned out to be a flaky
+rerun, not a regression: confirmed passing both in isolation and on a
+second full-suite run). `npm run typecheck`, `npm run test`, and
+`npm run build` all pass across every workspace; the migration applied
+clean against a live local Postgres.
+
+**Still open, unchanged by this follow-up:** the connector has never
+completed a real OAuth round trip against an actual Google account —
+Google recognizing the client credentials (verified in session 14) is
+not the same claim as `IDent → consent screen → callback → code exchange
+→ encrypted storage → refresh → revoke` actually working end to end. This
+needs the same treatment step-up auth's browser click-through got in
+session 12: Omar running it himself in a real browser, guided step by
+step, since the sandboxed browser-automation tool still can't reach
+localhost here. See "Next tasks" below for the exact walkthrough — do
+this before session 15 starts importing real messages, the same way the
+pre-Phase-1 gate wasn't considered closed until its own click-through
+happened.
+
 Also from session 13 — first slice of **Phase 1:
 Communications Hub**, now that Phase 0B is closed — see session 12's
 paragraphs below for how that gate closed. Per "Next tasks"' session-1
@@ -650,6 +713,16 @@ read.
   Google. `npm run typecheck`, `npm run test`, and `npm run build` all
   pass across every workspace; the migration applied clean against a
   live local Postgres. No UI yet (session 4).
+- **Session 14.5 (same-day follow-up, see header for full writeup): PKCE
+  + Gmail account identity.** New `pkce_verifier` column on
+  `oauth_state_challenges` (migration `0010_jazzy_violations.sql`);
+  `startGmailConnection`/`completeGmailConnection` generate and verify a
+  full PKCE round trip. New `providerAccountId`/`providerAccountEmail`
+  columns on `connected_sources` plus a unique `(identityId, provider,
+  providerAccountId)` index — reconnecting the same Gmail mailbox now
+  updates the existing row instead of duplicating it. 10 more tests (111
+  total). **Real Google OAuth end-to-end is still unverified** — see
+  header and "Next tasks."
 
 ## Architecture decisions made in this scaffold
 
@@ -1056,9 +1129,42 @@ UI before intelligence, mirroring how Phase 0B itself was built
    buffer, `gmail.readonly`-only scope, `state`-validated callback,
    token-refresh tests, and a real disconnect that clears stored tokens
    outright. `POST /identity/connections/gmail/start`, `GET .../callback`,
-   `POST .../:sourceId/disconnect`.
+   `POST .../:sourceId/disconnect`. Hardened same-day (session 14.5): PKCE
+   and per-mailbox account identity (dedup on reconnect) — see header.
 
-3. **Message sync. This is the next session to do.** Pull recent messages
+2.5. **Real-browser-verify the Gmail connector end to end. Do this before
+   session 15.** Not yet done — session 14's own credential check only
+   proved Google recognizes the client ID/secret, not that a real consent
+   flow completes. Same standard as session 12's step-up-auth
+   click-through, guided step by step since the sandboxed browser tool
+   still can't reach localhost here:
+   1. `npm run dev:api` + `npm run dev:web`, log in as a real (test)
+      identity on `/account`.
+   2. `curl -X POST http://localhost:4000/identity/connections/gmail/start
+      -H "Authorization: Bearer <session token>"` — no UI button exists
+      yet (session 4), so this step is curl/REST-client-only for now.
+   3. Open the returned `authorizationUrl` in a real browser, approve
+      Google's consent screen with a real Gmail account.
+   4. Confirm the callback redirects to `/account?gmail=connected`.
+   5. Inspect `connected_sources` directly (`docker exec` + `psql`, or a
+      DB client) — confirm `status: "connected"`, a real
+      `providerAccountEmail` matching the account used, and
+      `encrypted_token_data` populated (and genuinely opaque — it should
+      not resemble a real OAuth token).
+   6. Force a refresh: temporarily shrink `ACCESS_TOKEN_REFRESH_BUFFER_MS`
+      (or just wait out a real access-token lifetime) and call
+      `getActiveGmailAccessToken` (no route yet — exercise it via a
+      one-off script or a temporary debug route) — confirm the stored
+      payload's `accessToken` actually changes.
+   7. `POST /identity/connections/gmail/:sourceId/disconnect` — confirm
+      `encrypted_token_data` is cleared in the database, and that Google's
+      own [Third-party apps & services](https://myaccount.google.com/permissions)
+      page no longer lists this connection.
+   Fix anything this catches, the way session 11 and 12's click-throughs
+   did. Once this passes, session 15 can start syncing real messages
+   with real confidence in the connector underneath it.
+
+3. **Message sync. Do this after 2.5 above.** Pull recent messages
    from a connected Gmail account (via `getActiveGmailAccessToken` from
    session 14 — it already handles refreshing an expired token, so this
    session shouldn't need to touch that logic), normalize into `messages`

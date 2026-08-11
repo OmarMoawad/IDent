@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { ACCESS_TOKEN_REFRESH_BUFFER_MS, OAUTH_STATE_TTL_MS } from "./comms-config.js";
 import { GoogleOAuthError, googleOAuthClient, type GoogleOAuthClient } from "./google-oauth-client.js";
 import {
@@ -6,6 +6,7 @@ import {
   clearConnectedSourceTokens,
   consumeOauthStateChallenge,
   findConnectedSourceById,
+  findConnectedSourceByProviderAccount,
   findConnectedSourceEncryptedTokenData,
   insertConnectedSource,
   insertOauthStateChallenge,
@@ -59,9 +60,22 @@ type StoredTokenPayload = {
 };
 
 /**
- * Starts a Gmail connection: mints a single-use OAuth state challenge
- * tying this specific attempt to `identityId`, and returns the URL the
- * client should redirect the browser to. Nothing is written to
+ * PKCE (session 14.5, RFC 7636): a fresh, high-entropy verifier per
+ * attempt, and the S256 challenge derived from it — `code_challenge` goes
+ * on the authorization URL now, `code_verifier` (the verifier itself)
+ * only travels at code-exchange time, alongside the state challenge that
+ * already ties this attempt to an identity.
+ */
+function generatePkcePair(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  return { verifier, challenge };
+}
+
+/**
+ * Starts a Gmail connection: mints a single-use OAuth state + PKCE
+ * challenge tying this specific attempt to `identityId`, and returns the
+ * URL the client should redirect the browser to. Nothing is written to
  * connected_sources yet — that only happens once the callback actually
  * completes (completeGmailConnection below), so an abandoned consent flow
  * never leaves a half-connected row behind.
@@ -71,13 +85,15 @@ export async function startGmailConnection(
   client: GoogleOAuthClient = googleOAuthClient,
 ): Promise<{ authorizationUrl: string }> {
   const state = randomBytes(32).toString("base64url");
+  const { verifier, challenge } = generatePkcePair();
   await insertOauthStateChallenge({
     identityId,
     provider: PROVIDER,
     state,
+    pkceVerifier: verifier,
     expiresAt: new Date(Date.now() + OAUTH_STATE_TTL_MS),
   });
-  return { authorizationUrl: client.getAuthorizationUrl(state) };
+  return { authorizationUrl: client.getAuthorizationUrl(state, challenge) };
 }
 
 /**
@@ -86,6 +102,10 @@ export async function startGmailConnection(
  * oauth_state_challenges' comment in schema.ts for why the callback
  * request itself carries no other way to identify who it belongs to (it's
  * an anonymous top-level browser redirect from Google, no bearer token).
+ * Fetches the connected mailbox's own address (session 14.5) so
+ * reconnecting the same Gmail account updates that existing
+ * connected_sources row instead of silently accumulating a duplicate —
+ * see connected_sources_identity_provider_account_key in schema.ts.
  */
 export async function completeGmailConnection(
   code: string,
@@ -95,7 +115,7 @@ export async function completeGmailConnection(
   const consumed = await consumeOauthStateChallenge(state);
   if (!consumed || consumed.provider !== PROVIDER) throw new OauthStateInvalidError();
 
-  const tokens = await client.exchangeCodeForTokens(code);
+  const tokens = await client.exchangeCodeForTokens(code, consumed.pkceVerifier);
   if (!tokens.refreshToken) {
     // getAuthorizationUrl always requests prompt=consent specifically to
     // guarantee a refresh token comes back — treated as a hard failure
@@ -104,14 +124,29 @@ export async function completeGmailConnection(
     throw new GoogleOAuthError("Google did not return a refresh token for this connection.");
   }
 
-  const source = await insertConnectedSource({ identityId: consumed.identityId, provider: PROVIDER });
+  const accountEmail = await client.getAccountEmail(tokens.accessToken);
+
   const payload: StoredTokenPayload = {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     expiresAt: tokens.expiresAt.toISOString(),
     scope: tokens.scope,
   };
-  await setConnectedSourceTokens(source.id, encryptTokenPayload(JSON.stringify(payload)));
+  const encrypted = encryptTokenPayload(JSON.stringify(payload));
+
+  const existing = await findConnectedSourceByProviderAccount(consumed.identityId, PROVIDER, accountEmail);
+  if (existing) {
+    await setConnectedSourceTokens(existing.id, encrypted);
+    return { ...existing, status: "connected" };
+  }
+
+  const source = await insertConnectedSource({
+    identityId: consumed.identityId,
+    provider: PROVIDER,
+    providerAccountId: accountEmail,
+    providerAccountEmail: accountEmail,
+  });
+  await setConnectedSourceTokens(source.id, encrypted);
 
   return { ...source, status: "connected" };
 }

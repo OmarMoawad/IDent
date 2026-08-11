@@ -11,12 +11,20 @@ import type { ExchangedTokens, GoogleOAuthClient, RefreshedTokens } from "../goo
  * Every method also records its calls, so a test can assert not just "did
  * this succeed" but "was refreshAccessToken even called" — the near-expiry
  * decision in gmail-service.ts's refresh logic has no other observable
- * side effect to check against.
+ * side effect to check against. exchangeCodeForTokensCalls and
+ * getAuthorizationUrl's recorded codeChallenge/codeVerifier let a test
+ * prove the *same* PKCE verifier that built the authorization URL is the
+ * one that reaches token exchange, without this fake re-deriving or
+ * checking the SHA-256 relationship itself (that's Google's job, not this
+ * double's — see google-oauth-client.test.ts for the real client's own
+ * unit test of that math).
  */
 export class FakeGoogleOAuthClient implements GoogleOAuthClient {
-  exchangeCodeForTokensCalls: string[] = [];
+  getAuthorizationUrlCalls: { state: string; codeChallenge: string }[] = [];
+  exchangeCodeForTokensCalls: { code: string; codeVerifier: string }[] = [];
   refreshAccessTokenCalls: string[] = [];
   revokeTokenCalls: string[] = [];
+  getAccountEmailCalls: string[] = [];
 
   nextExchangeResult: ExchangedTokens | Error = {
     accessToken: "fake-access-token",
@@ -31,12 +39,16 @@ export class FakeGoogleOAuthClient implements GoogleOAuthClient {
     refreshToken: null,
   };
 
-  getAuthorizationUrl(state: string): string {
-    return `https://accounts.google.com/o/oauth2/v2/auth?fake=true&state=${encodeURIComponent(state)}`;
+  nextAccountEmail: string | Error = "fake.connected.account@gmail.com";
+
+  getAuthorizationUrl(state: string, codeChallenge: string): string {
+    this.getAuthorizationUrlCalls.push({ state, codeChallenge });
+    const params = new URLSearchParams({ fake: "true", state, code_challenge: codeChallenge });
+    return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
   }
 
-  async exchangeCodeForTokens(code: string): Promise<ExchangedTokens> {
-    this.exchangeCodeForTokensCalls.push(code);
+  async exchangeCodeForTokens(code: string, codeVerifier: string): Promise<ExchangedTokens> {
+    this.exchangeCodeForTokensCalls.push({ code, codeVerifier });
     if (this.nextExchangeResult instanceof Error) throw this.nextExchangeResult;
     return this.nextExchangeResult;
   }
@@ -49,5 +61,11 @@ export class FakeGoogleOAuthClient implements GoogleOAuthClient {
 
   async revokeToken(token: string): Promise<void> {
     this.revokeTokenCalls.push(token);
+  }
+
+  async getAccountEmail(accessToken: string): Promise<string> {
+    this.getAccountEmailCalls.push(accessToken);
+    if (this.nextAccountEmail instanceof Error) throw this.nextAccountEmail;
+    return this.nextAccountEmail;
   }
 }

@@ -49,6 +49,35 @@ describe("gmail-service: startGmailConnection", () => {
 
     await app.close();
   });
+
+  it("sends a fresh PKCE code_challenge with the authorization URL, and consuming the matching state later carries the verifier that hashes to it", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const client = new FakeGoogleOAuthClient();
+
+    await startGmailConnection(identityId, client);
+    expect(client.getAuthorizationUrlCalls).toHaveLength(1);
+    const { codeChallenge } = client.getAuthorizationUrlCalls[0];
+    expect(codeChallenge).toBeTruthy();
+
+    // The verifier consumeOauthStateChallenge later hands back (and that
+    // completeGmailConnection sends to exchangeCodeForTokens) must be the
+    // exact one this same challenge was derived from — not just "some
+    // verifier" — otherwise PKCE isn't actually binding the two steps
+    // together. Recompute S256(verifier) the same way the real Google
+    // client does and check it matches what was sent.
+    const { createHash } = await import("node:crypto");
+    const { authorizationUrl } = await startGmailConnection(identityId, client);
+    const state = extractState(authorizationUrl);
+    const secondChallenge = client.getAuthorizationUrlCalls[1].codeChallenge;
+
+    await completeGmailConnection("fake-auth-code", state, client);
+    const sentVerifier = client.exchangeCodeForTokensCalls.at(-1)!.codeVerifier;
+    const recomputedChallenge = createHash("sha256").update(sentVerifier).digest("base64url");
+    expect(recomputedChallenge).toBe(secondChallenge);
+
+    await app.close();
+  });
 });
 
 describe("gmail-service: completeGmailConnection", () => {
@@ -61,7 +90,10 @@ describe("gmail-service: completeGmailConnection", () => {
     expect(source.identityId).toBe(identityId);
     expect(source.provider).toBe("gmail");
     expect(source.status).toBe("connected");
-    expect(client.exchangeCodeForTokensCalls).toEqual(["fake-auth-code"]);
+    expect(client.exchangeCodeForTokensCalls).toHaveLength(1);
+    expect(client.exchangeCodeForTokensCalls[0].code).toBe("fake-auth-code");
+    expect(source.providerAccountId).toBe("fake.connected.account@gmail.com");
+    expect(source.providerAccountEmail).toBe("fake.connected.account@gmail.com");
 
     const found = await findConnectedSourcesByIdentity(identityId);
     expect(found.map((s) => s.id)).toContain(source.id);
@@ -70,6 +102,50 @@ describe("gmail-service: completeGmailConnection", () => {
     expect(encrypted).not.toContain("fake-access-token"); // must be ciphertext, not the raw token
     const payload = JSON.parse(decryptTokenPayload(encrypted!));
     expect(payload.accessToken).toBe("fake-access-token");
+
+    await app.close();
+  });
+
+  it("reconnecting the same Gmail account updates the existing source instead of duplicating it", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const client = new FakeGoogleOAuthClient();
+    client.nextAccountEmail = "same.mailbox@gmail.com";
+
+    const first = await connectSource(app, identityId, client);
+
+    client.nextExchangeResult = {
+      accessToken: "second-connection-access-token",
+      refreshToken: "second-connection-refresh-token",
+      expiresAt: new Date(Date.now() + 3_600_000),
+      scope: "https://www.googleapis.com/auth/gmail.readonly",
+    };
+    const second = await connectSource(app, identityId, client);
+
+    expect(second.id).toBe(first.id); // same row, not a new one
+    const sourcesForIdentity = await findConnectedSourcesByIdentity(identityId);
+    expect(sourcesForIdentity.filter((s) => s.providerAccountId === "same.mailbox@gmail.com")).toHaveLength(1);
+
+    const encrypted = await findConnectedSourceEncryptedTokenData(second.id);
+    const payload = JSON.parse(decryptTokenPayload(encrypted!));
+    expect(payload.accessToken).toBe("second-connection-access-token"); // tokens actually refreshed, not stale
+
+    await app.close();
+  });
+
+  it("two different identities connecting the same Gmail account each get their own source", async () => {
+    const app = buildApp();
+    const identityA = await createTestIdentity(app);
+    const identityB = await createTestIdentity(app);
+    const client = new FakeGoogleOAuthClient();
+    client.nextAccountEmail = "shared.mailbox@gmail.com";
+
+    const sourceA = await connectSource(app, identityA, client);
+    const sourceB = await connectSource(app, identityB, client);
+
+    expect(sourceA.id).not.toBe(sourceB.id);
+    expect(sourceA.identityId).toBe(identityA);
+    expect(sourceB.identityId).toBe(identityB);
 
     await app.close();
   });

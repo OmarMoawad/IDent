@@ -267,15 +267,17 @@ describe("comms/store: OAuth state challenges", () => {
     const app = buildApp();
     const identityId = await createTestIdentity(app);
     const state = randomUUID();
+    const pkceVerifier = randomUUID();
     await insertOauthStateChallenge({
       identityId,
       provider: "gmail",
       state,
+      pkceVerifier,
       expiresAt: new Date(Date.now() + 60_000),
     });
 
     const first = await consumeOauthStateChallenge(state);
-    expect(first).toEqual({ identityId, provider: "gmail" });
+    expect(first).toEqual({ identityId, provider: "gmail", pkceVerifier });
 
     const second = await consumeOauthStateChallenge(state);
     expect(second).toBeNull();
@@ -296,6 +298,7 @@ describe("comms/store: OAuth state challenges", () => {
       identityId,
       provider: "gmail",
       state,
+      pkceVerifier: randomUUID(),
       expiresAt: new Date(Date.now() - 1000),
     });
 
@@ -313,6 +316,7 @@ describe("comms/store: OAuth state challenges", () => {
       identityId,
       provider: "gmail",
       state,
+      pkceVerifier: randomUUID(),
       expiresAt: new Date(Date.now() + 60_000),
     });
 
