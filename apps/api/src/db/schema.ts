@@ -1,4 +1,17 @@
-import { boolean, integer, pgTable, primaryKey, serial, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  foreignKey,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  serial,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 /**
  * Phase 0A infra-proving table only — confirms migrations run end to end.
@@ -221,23 +234,35 @@ export const webauthnChallenges = pgTable("webauthn_challenges", {
  * live Postgres, the same way Phase 0A's first commit proved migrations
  * work end to end before anything called it over HTTP.
  */
-export const connectedSources = pgTable("connected_sources", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  identityId: uuid("identity_id")
-    .notNull()
-    .references(() => identities.id, { onDelete: "cascade" }),
-  // e.g. "gmail" — no real provider integration exists yet (a later Phase 1
-  // session wires up actual OAuth), so nothing currently populates this
-  // beyond test/seed data.
-  provider: text("provider").notNull(),
-  status: text("status").notNull().default("pending"),
-  // Opaque, encrypted-at-rest ciphertext once a real OAuth connector exists
-  // — this column exists now so the schema shape doesn't change again when
-  // that lands, but nothing writes to it yet. Never a plaintext token.
-  encryptedTokenData: text("encrypted_token_data"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const connectedSources = pgTable(
+  "connected_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    // e.g. "gmail" — no real provider integration exists yet (a later Phase 1
+    // session wires up actual OAuth), so nothing currently populates this
+    // beyond test/seed data.
+    provider: text("provider").notNull(),
+    status: text("status").notNull().default("pending"),
+    // Opaque, encrypted-at-rest ciphertext once a real OAuth connector exists
+    // — this column exists now so the schema shape doesn't change again when
+    // that lands, but nothing writes to it yet. Never a plaintext token.
+    encryptedTokenData: text("encrypted_token_data"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("connected_sources_identity_id_idx").on(table.identityId),
+    // Redundant-looking unique constraint on (id, identityId), alongside
+    // id's own primary key — this is what lets messages' composite foreign
+    // key below reference "this source, and confirm which identity it
+    // belongs to" as one constraint, not two independently-true ones. See
+    // that foreign key's comment for why this needs to exist.
+    unique("connected_sources_id_identity_id_key").on(table.id, table.identityId),
+  ],
+);
 
 /**
  * The unified message/notification shape every future connector (Gmail,
@@ -246,7 +271,8 @@ export const connectedSources = pgTable("connected_sources", {
  * canonical Receipt object. identityId is denormalized onto this table
  * (not just reachable via sourceId -> connectedSources.identityId) so
  * every query that scopes "this identity's messages" is a single indexed
- * lookup, not a join through connected_sources every time.
+ * lookup (messages_identity_occurred_at_idx below), not a join through
+ * connected_sources every time.
  */
 export const messages = pgTable(
   "messages",
@@ -255,9 +281,10 @@ export const messages = pgTable(
     identityId: uuid("identity_id")
       .notNull()
       .references(() => identities.id, { onDelete: "cascade" }),
-    sourceId: uuid("source_id")
-      .notNull()
-      .references(() => connectedSources.id, { onDelete: "cascade" }),
+    // No standalone .references() here — ownership is enforced by the
+    // composite foreign key below instead, which ties this column and
+    // identityId together.
+    sourceId: uuid("source_id").notNull(),
     // The provider's own message ID — paired with sourceId in the unique
     // index below so re-syncing the same source is idempotent (upsert on
     // conflict) instead of creating duplicate rows every sync run.
@@ -273,5 +300,27 @@ export const messages = pgTable(
     isRead: boolean("is_read").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("messages_source_external_id_idx").on(table.sourceId, table.externalId)],
+  (table) => [
+    uniqueIndex("messages_source_external_id_idx").on(table.sourceId, table.externalId),
+    // Matches findMessagesByIdentity's actual query shape (WHERE identityId
+    // = ? ORDER BY occurredAt DESC) as one index scan, not identityId alone
+    // — a composite index serves both the equality filter and the sort.
+    index("messages_identity_occurred_at_idx").on(table.identityId, table.occurredAt),
+    // The integrity guarantee a plain `sourceId.references(connectedSources.id)`
+    // alone can't give: that this message's identityId actually matches the
+    // identity that owns sourceId. Without this, comms/store.ts's
+    // upsertMessage could be called (by a future bug in a sync worker, a
+    // migration script, or anything else that bypasses the store's own
+    // discipline) with an identityId and a sourceId belonging to two
+    // different identities, and both individual foreign keys would still
+    // pass — this composite one, referencing connected_sources' matching
+    // (id, identity_id) unique constraint, makes that combination
+    // impossible at the database level, not just enforced by convention in
+    // application code.
+    foreignKey({
+      name: "messages_source_identity_fk",
+      columns: [table.sourceId, table.identityId],
+      foreignColumns: [connectedSources.id, connectedSources.identityId],
+    }).onDelete("cascade"),
+  ],
 );

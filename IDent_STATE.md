@@ -37,6 +37,37 @@ isRead surviving a resync, and newest-first ordering. `npm run typecheck`,
 `npm run test`, and `npm run build` all pass across every workspace; the
 migration applied clean against a live local Postgres.
 
+**Same-day follow-up (2026-08-11, still session 13):** an external review
+found two real gaps in the schema above, both worth closing before
+session 14's Gmail connector starts writing real data. (1) The comment
+claiming `findMessagesByIdentity`'s `identityId` filter was "a single
+indexed lookup" was wrong — no index on `messages.identityId` or
+`connected_sources.identityId` actually existed yet. Fixed:
+`messages_identity_occurred_at_idx`, a composite index on
+`(identityId, occurredAt)` matching that function's actual query shape
+(equality filter + sort) in one index scan, and
+`connected_sources_identity_id_idx` for `findConnectedSourcesByIdentity`.
+(2) More importantly: nothing tied a message's `identityId` to the
+identity that actually owns its `sourceId` — `messages.identityId` and
+`messages.sourceId` were two independently-valid foreign keys with no
+relationship to each other, so a bug in a future sync worker could insert
+`{identityId: Alice, sourceId: <Bob's connected source>}` and both
+individual foreign keys would still pass. Fixed at the database level, not
+just by convention: `connected_sources` gained a
+`(id, identityId)` unique constraint, and `messages.sourceId` now has a
+**composite** foreign key against that pair instead of a plain
+single-column one — `(sourceId, identityId)` must match a real
+`connected_sources` row's `(id, identityId)`, making the mismatched
+combination impossible to insert, not just untested. One new regression
+test (69 total) proves inserting a message with another identity's
+`sourceId` throws. Required reordering one migration statement
+(`0008_cold_tenebrous.sql`) by hand — drizzle-kit generated the new
+composite foreign key *before* the unique constraint it depends on, which
+Postgres rejects ("no unique constraint matching given keys"); the unique
+constraint now runs first. `npm run typecheck`, `npm run test`, and
+`npm run build` all pass across every workspace; the migration re-applied
+clean against a live local Postgres.
+
 Also from session 12 — step-up auth / elevated sessions,
 per the pre-Phase-1 gate's last remaining item, confirmed as this
 session's starting task by a 2026-08-11 external review — see "Next
@@ -508,12 +539,20 @@ read.
   This closed the external review's pre-Phase-1 gate; Phase 0B is done.
 - **Phase 1 — Communications Hub, session 13 (see this file's header for
   the full design writeup): schema/data-model foundation only.** New
-  `connected_sources` and `messages` tables (migration
-  `0007_exotic_ultimates.sql`), new `comms/store.ts` (insert/find
-  connected sources and messages, all identity-scoped; `upsertMessage` is
-  idempotent on `(sourceId, externalId)`). No OAuth, no HTTP routes, no UI
-  yet — `comms/store.test.ts` exercises the store layer directly against a
-  live Postgres. 8 new tests (68 total in the API workspace). `npm run
+  `connected_sources` and `messages` tables (migrations
+  `0007_exotic_ultimates.sql`, `0008_cold_tenebrous.sql`), new
+  `comms/store.ts` (insert/find connected sources and messages, all
+  identity-scoped; `upsertMessage` is idempotent on `(sourceId,
+  externalId)`). Same-day follow-up (see header): a composite foreign key
+  now ties `messages.sourceId` to `connected_sources`' `(id, identityId)`
+  pair, so a message's `identityId` can never mismatch the identity that
+  actually owns its `sourceId` — not just a plain single-column FK plus
+  hope; indexes added on both tables' `identityId` columns
+  (`messages_identity_occurred_at_idx` is composite with `occurredAt`,
+  matching the actual query shape). No OAuth, no HTTP routes, no UI yet —
+  `comms/store.test.ts` exercises the store layer directly against a live
+  Postgres. 9 new tests (69 total in the API workspace), including a
+  regression test proving a cross-identity `sourceId` is rejected. `npm run
   typecheck`, `npm run test`, and `npm run build` all pass across every
   workspace; the migration applied clean against a live local Postgres.
 
@@ -808,6 +847,17 @@ by this gate.
 Logged so a future session doesn't have to rediscover these; none of them
 block Phase 0B and none should be designed now:
 
+- **`messages`' current columns (subject/snippet/body/participants) will
+  become a lossy archive once a real provider connector lands** — fine as
+  the *normalized* shape for Session 13's foundation-only scope (matches
+  Receiptless's own "one canonical object, capture-channel-agnostic"
+  principle), but Gmail and any later provider carry more than that:
+  thread ID, labels/folders, MIME type, attachments, sender/reply-to,
+  provider-side metadata, and a sync cursor/history ID for incremental
+  sync. Don't design a provider/raw-metadata envelope now — no driver
+  exists yet to know its real shape — but when session 14+ actually syncs
+  real Gmail messages, give it somewhere to keep what doesn't fit the
+  normalized columns instead of silently dropping it.
 - **Scoped/pseudonymous per-relationship identifiers** (Receiptless
   integration, and any future merchant/carrier/institution-facing flow) —
   today's Data model note (ARCHITECTURE.md) has exactly one public,
@@ -905,10 +955,27 @@ UI before intelligence, mirroring how Phase 0B itself was built
 2. **OAuth connection flow, first provider (Gmail). This is the next
    session to do.** **Needs Omar**:
    a Google Cloud project, OAuth consent screen, and client ID/secret —
-   can't be guessed at or defaulted. Store tokens encrypted at rest (this
-   is exactly the kind of Medium-tier data SECURITY.md's tiering exists
-   for). `POST /identity/connections/gmail/{options,callback}` or
-   equivalent, session-gated like every other post-Phase-0B route.
+   can't be guessed at or defaulted. `POST /identity/connections/gmail/
+   {options,callback}` or equivalent, session-gated like every other
+   post-Phase-0B route. A same-day session-13 follow-up review set a
+   concrete pre-connector checklist, sharpening the one-liner above —
+   don't start this session without addressing each item, the same
+   discipline session 12's own requirement list got:
+   - encrypted token storage using real authenticated encryption (AES-GCM
+     or equivalent), not the placeholder `encrypted_token_data` column
+     session 13 left unused — this is exactly the kind of Medium-tier data
+     SECURITY.md's tiering exists for
+   - access and refresh tokens handled/rotated separately, not treated as
+     one interchangeable secret
+   - request the minimum Gmail scopes the sync actually needs, not a
+     broad grant "in case it's useful later"
+   - validate OAuth `state` on the callback (CSRF/replay protection for
+     the ceremony itself)
+   - tests proving token refresh actually works, not just initial connect
+   - a real disconnect/revocation path — a `connected_sources` row going
+     from `connected` to `disconnected` (or being deleted) must actually
+     stop future syncs from touching it, not just change a status label
+     nothing reads
 
 3. **Message sync.** Pull recent messages from a connected Gmail account,
    normalize into `Message` rows via Session 1's schema. Background job or

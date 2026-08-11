@@ -57,6 +57,13 @@
       "when": 1786439490221,
       "tag": "0007_exotic_ultimates",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786441037176,
+      "tag": "0008_cold_tenebrous",
+      "breakpoints": true
     }
   ]
 }

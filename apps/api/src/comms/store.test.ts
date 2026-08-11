@@ -190,4 +190,29 @@ describe("comms/store: messages", () => {
 
     await app.close();
   });
+
+  it("rejects inserting a message with a sourceId that belongs to a different identity", async () => {
+    // Regression test for a real gap an external review found: identityId
+    // and sourceId were two independently-valid foreign keys with nothing
+    // tying them to each other, so a bug in a future sync worker could
+    // silently write Bob's connected-source messages under Alice's
+    // identityId. schema.ts's messages_source_identity_fk (a composite FK
+    // against connected_sources' own (id, identityId) unique constraint)
+    // makes that combination impossible at the database level.
+    const app = buildApp();
+    const identityA = await createTestIdentity(app);
+    const identityB = await createTestIdentity(app);
+    const sourceOwnedByB = await insertConnectedSource({ identityId: identityB, provider: "gmail" });
+
+    await expect(
+      upsertMessage({
+        identityId: identityA,
+        sourceId: sourceOwnedByB.id,
+        externalId: "cross-identity-attempt",
+        occurredAt: new Date(),
+      }),
+    ).rejects.toThrow();
+
+    await app.close();
+  });
 });
