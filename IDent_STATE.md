@@ -5,15 +5,86 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-12 (item 2.5's real-browser Gmail OAuth
+Last updated: 2026-08-12 — **Session 15 done**: real Gmail message sync,
+the third slice of **Phase 1: Communications Hub**. Built directly on
+item 2.5's now-proven connector and session 14's `getActiveGmailAccessToken`
+(refresh handled there already — this session never re-touches that logic):
+
+- **Design questions resolved first, per "Next tasks"' own instruction to
+  decide before writing code.** On-demand, not a background job — a
+  user-triggered "Sync now" action (`POST /identity/connections/gmail/
+  :sourceId/sync`), simpler to ship and test, matching the session-14.5
+  note's own "likely on-demand first" guess. Sync window: the most recent
+  `GMAIL_SYNC_MAX_MESSAGES` (25, `comms-config.ts`) messages per call —
+  not "all mail" (unrealistic, per the open question itself), bounded so
+  one HTTP request's worth of Gmail API calls (1 list + up to 25 gets)
+  finishes inside a normal request timeout. The third open question — a
+  connected source whose token turns out to be permanently revoked outside
+  IDent — is **not** resolved this session; logged as a known gap below
+  rather than guessed at, since it needs its own error-status design, not
+  a bolt-on.
+- **`comms/gmail-api-client.ts`**: a `GmailApiClient` interface
+  (`listMessageIds`/`getMessage`) wrapping Gmail's real `messages.list`/
+  `messages.get` endpoints via plain `fetch` — same "no SDK, raw fetch"
+  convention as `google-oauth-client.ts`'s `RealGoogleOAuthClient`, not a
+  new dependency. `getMessage` recursively walks `payload.parts` for the
+  first `text/plain` body (falls back through `multipart/alternative`/
+  `multipart/mixed`), base64url-decodes it, and pulls `Subject`/`From`/`To`
+  from the header array. `comms/test-support/fake-gmail-api-client.ts` is
+  the injected double — same role `FakeGoogleOAuthClient` played for
+  session 14 — seeded with plain `GmailMessage` objects, no real Gmail
+  account or network needed to test sync logic.
+- **`comms/participants.ts`**: parses a `From`/`To` header value into
+  `{name?, address}[]` (handles both `"Name" <addr>` and bare `addr`,
+  splits on commas outside quoted display names) — this is what
+  `messages.participants` (session 13's schema, previously unused) now
+  actually gets populated with, as `{from: [...], to: [...]}` JSON.
+  Deliberately forgiving rather than a full RFC 5322 parser: display
+  metadata for an inbox UI, not a security boundary, so an unparseable
+  header degrades to an address-only entry instead of throwing.
+- **`comms/gmail-sync-service.ts`**'s `syncGmailMessages(identityId,
+  sourceId)`: gets a valid access token via session 14's own
+  `getActiveGmailAccessToken` (so ownership/connection-state checks —
+  unknown source, another identity's source, a disconnected source — are
+  inherited for free, not re-implemented), lists up to
+  `GMAIL_SYNC_MAX_MESSAGES` message ids, fetches each, and upserts into
+  `messages` via session 13's `upsertMessage` (already idempotent on
+  `(sourceId, externalId)`, so calling this repeatedly just refreshes
+  content rather than duplicating rows — verified directly, not assumed).
+- **New route**: `POST /identity/connections/gmail/:sourceId/sync`,
+  session-gated like every route since Phase 0B, mapping
+  `ConnectedSourceNotFoundError`/`OwnershipError`/`NotConnectedError`
+  (all reused from `gmail-service.ts`, nothing new to define) to
+  404/403/409 respectively, registered in `gmail-routes.ts` alongside
+  `/start`/`/callback`/`/disconnect`.
+- **12 new tests (123 total in the API workspace)**:
+  `gmail-sync-service.test.ts` (4) exercises real sync/normalization logic
+  against the fake Gmail API client — a full sync populating `subject`/
+  `snippet`/`body`/`occurredAt`/`participants` correctly, re-sync updating
+  content on the same row rather than duplicating it, the
+  `GMAIL_SYNC_MAX_MESSAGES` cap actually capping both the list result and
+  the number of `getMessage` calls, and an address-only `From`/`To` (no
+  display name) still storing correctly. `gmail-routes.test.ts` gained 4
+  more, following the exact same "only test what's reachable without a
+  real Google/Gmail account" convention `/start`/`/callback` already use:
+  auth gating, 404 on an unknown source, 403 on another identity's source,
+  and 409 syncing a tokenless (never-connected) source — a real
+  full-sync happy path isn't HTTP-testable here for the same reason it
+  isn't for `/start`, no way to inject a fake client through HTTP; the
+  service-level tests are what cover that logic. No schema change needed
+  this session — `messages`/`connected_sources` (session 13) already had
+  everything sync needed. `npm run typecheck`, `npm run test` (123
+  passing), and `npm run build` all pass across every workspace. Still no
+  UI to trigger a sync from — that's session 4 of this Phase 1 cadence
+  ("Unified inbox UI"), which can now call this route once it exists.
+
+Also from item 2.5 (2026-08-12): its real-browser Gmail OAuth
 click-through — done, with Omar, and it found a real bug; see the header
 paragraph below "Still open, unchanged by this follow-up" for the full
-writeup. Session 15 — real message sync — can now start with actual
-confidence in the connector underneath it.) Session 14 — Gmail OAuth
-connection flow, the second slice of **Phase 1: Communications Hub** —
-see session 13's paragraph below for the schema foundation this builds
-on. Built to the same-day session-13 review's pre-connector checklist
-point by point:
+writeup. Session 14 — Gmail OAuth connection flow, the second slice of
+**Phase 1: Communications Hub** — see session 13's paragraph below for the
+schema foundation this builds on. Built to the same-day session-13
+review's pre-connector checklist point by point:
 
 - **Real Google Cloud OAuth credentials** — Omar created the project,
   consent screen (External, `gmail.readonly` scope only, test users),
@@ -464,12 +535,13 @@ header), closing the external review's pre-Phase-1 gate. Phase 0A
 (ROADMAP.md Era I) has been done since session 3 — see its checklist
 below. **Phase 1 — Communications Hub** (ROADMAP.md) is now in progress:
 session 13 laid the schema/data-model foundation (`connected_sources`,
-`messages`), session 14 (see this file's header) built the real Gmail
-OAuth connector on top of it — connect, refresh, disconnect, all
-encrypted, tested, and backed by real (verified) Google Cloud credentials.
-No UI yet — see "Next tasks" below for the full session-by-session
-sequencing and what's next (session 3 of that list: message sync, pulling
-real messages from a connected Gmail account into the `messages` table).
+`messages`), session 14 (real-browser-verified via item 2.5) built the
+real Gmail OAuth connector — connect, refresh, disconnect, all encrypted,
+tested, and backed by real Google Cloud credentials — and session 15 (see
+this file's header) built real on-demand message sync on top of it,
+pulling recent Gmail messages into the `messages` table. Still no UI —
+see "Next tasks" below for the full session-by-session sequencing (next:
+session 4 of that list, "Unified inbox UI").
 
 Done so far: register with a username + password (with a real client-side
 Account Master Key generated, wrapped, and sent to the server), log in with
@@ -783,8 +855,27 @@ read.
   columns on `connected_sources` plus a unique `(identityId, provider,
   providerAccountId)` index — reconnecting the same Gmail mailbox now
   updates the existing row instead of duplicating it. 10 more tests (111
-  total). **Real Google OAuth end-to-end is still unverified** — see
-  header and "Next tasks."
+  total). Real Google OAuth end-to-end was unverified at the time this
+  entry was written — closed by item 2.5's click-through, see header.
+- **Item 2.5 (real-browser Gmail OAuth click-through, 2026-08-12, with
+  Omar): see header for the full writeup**, including the empty-`client_id`
+  bug it found and fixed (`apps/api/src/load-env.ts`) and the startup
+  warning added afterward. Every checklist step in "Next tasks"' item 2.5
+  passed against a real Gmail account.
+- **Session 15 (see header for the full design writeup): real, on-demand
+  Gmail message sync.** New `comms/gmail-api-client.ts` (`GmailApiClient`
+  interface + `RealGmailApiClient`, raw `fetch` against Gmail's
+  `messages.list`/`messages.get`), `comms/participants.ts`
+  (`From`/`To` header → `{name?, address}[]`), `comms/gmail-sync-service.ts`
+  (`syncGmailMessages`, built on session 14's `getActiveGmailAccessToken`
+  and session 13's `upsertMessage`), new `POST /identity/connections/
+  gmail/:sourceId/sync` route. 12 new tests (123 total in the API
+  workspace) via `comms/test-support/fake-gmail-api-client.ts` (same role
+  `FakeGoogleOAuthClient` plays for OAuth) plus route-level auth/
+  ownership/connection-state tests that never call Google. No schema
+  change — session 13's `messages`/`connected_sources` already had
+  everything this needed. `npm run typecheck`, `npm run test`, and
+  `npm run build` all pass across every workspace. No UI yet (session 4).
 
 ## Architecture decisions made in this scaffold
 
@@ -1223,35 +1314,23 @@ UI before intelligence, mirroring how Phase 0B itself was built
       own [Third-party apps & services](https://myaccount.google.com/permissions)
       page no longer lists this connection.
 
-3. **Message sync. Do this now that 2.5 is done.** Pull recent messages
-   from a connected Gmail account (via `getActiveGmailAccessToken` from
-   session 14 — it already handles refreshing an expired token, so this
-   session shouldn't need to touch that logic), normalize into `messages`
-   rows via session 13's schema (`upsertMessage` is already idempotent on
-   `(sourceId, externalId)`, so re-syncing is safe to call repeatedly).
-   Real Gmail API calls, not fakeable the way OAuth token exchange was —
-   this session should follow session 14's own pattern: wrap the Gmail
-   API surface behind a small injectable interface (a `GmailApiClient` or
-   similar) so `comms/test-support/` gets a fake for it too, the same way
-   `FakeGoogleOAuthClient` let session 14 be tested without hitting
-   Google's real OAuth endpoints. **Open design question to resolve at the
-   start of that session, before writing code** (per RECEIPTLESS_STATE.md's
-   own convention of flagging these rather than improvising mid-session):
-   background job or on-demand endpoint — decide which before writing
-   code. On-demand is simpler to ship and test; a background job is what
-   "daily-driver inbox aggregator" actually needs long-term — likely
-   on-demand first, background job as a fast-follow once the sync logic
-   itself is proven. Also decide: how far back does an initial sync reach
-   (all mail is not realistic), and what happens to a source stuck in
-   `status: "connected"` whose access token turns out to be permanently
-   unusable (revoked outside IDent, e.g. from Google's own account
-   settings) — should a sync failure eventually flip it to an error
-   status a UI can surface, not just fail silently forever.
+3. ~~**Message sync.**~~ — done in session 15 (see this file's header and
+   "Completed components" above): on-demand `POST /identity/connections/
+   gmail/:sourceId/sync`, `GmailApiClient` + fake, `comms/
+   gmail-sync-service.ts`, 12 tests. **Left open, not resolved this
+   session** (see header's "Design questions resolved first" note): what
+   happens to a source stuck in `status: "connected"` whose access token
+   turns out to be permanently unusable (revoked outside IDent, e.g. from
+   Google's own account settings) — a sync currently just throws/fails per
+   call rather than flipping the source to a distinct error status a UI
+   could surface. Needs its own design, not a bolt-on; revisit once the
+   unified inbox UI (below) exists to actually show such a status.
 
 4. **Unified inbox UI.** List/read/search messages across whatever
-   sources are connected — the first user-facing surface of Phase 1.
-   Exit-criteria-relevant: this is what makes IDent "daily-driver usable
-   as a notification/inbox aggregator" per ROADMAP.md's own bar.
+   sources are connected — the first user-facing surface of Phase 1, and
+   what finally gives session 15's `/sync` route a caller. Exit-criteria-
+   relevant: this is what makes IDent "daily-driver usable as a
+   notification/inbox aggregator" per ROADMAP.md's own bar.
 
 5. **Contact cards.** Unify contacts surfaced by connected sources into
    one record per person — not calling/communications routing yet (that's
@@ -1321,10 +1400,13 @@ None yet — there is no staging or production target. Local-only: see
   /identity/demo/high-tier-secret` sits behind the stricter
   `requireElevatedSession()` (session 12) instead — a valid base session
   alone isn't enough, it must also be currently elevated.
-- `POST /identity/connections/gmail/start` and `POST .../:sourceId/
-  disconnect` (session 14) sit behind `validateSession()` like every other
-  post-Phase-0B route, with `disconnect` additionally checking the
-  connected source's `identityId` matches the caller's before touching it.
+- `POST /identity/connections/gmail/start`, `POST .../:sourceId/
+  disconnect` (session 14), and `POST .../:sourceId/sync` (session 15) all
+  sit behind `validateSession()` like every other post-Phase-0B route,
+  with `disconnect` and `sync` both additionally checking the connected
+  source's `identityId` matches the caller's before touching it (`sync`
+  inherits this check for free from `getActiveGmailAccessToken`, the same
+  function `disconnect` and `refresh` already used it through).
   `GET .../callback` is the one intentional exception — it can't carry a
   bearer token (it's an anonymous top-level redirect from Google, not a
   fetch from apps/web), so its equivalent gate is the single-use,

@@ -23,6 +23,14 @@ export const OAUTH_STATE_TTL_MS = 1000 * 60 * 10;
 // sync job never starts a request with a token that expires mid-flight.
 export const ACCESS_TOKEN_REFRESH_BUFFER_MS = 1000 * 60 * 2;
 
+// Session 15: how many of the most recent messages a single on-demand sync
+// pulls. On-demand (not a background job) per IDent_STATE.md's session-14.5
+// design note — a user-triggered "Sync now" action, not a poller — so this
+// bounds one HTTP request's Gmail API calls (1 list + up to this many gets)
+// to something that finishes within a normal request timeout, not a
+// long-term inbox size limit.
+export const GMAIL_SYNC_MAX_MESSAGES = 25;
+
 /**
  * Symmetric key for encrypting connected_sources.encrypted_token_data at
  * rest (AES-256-GCM — see token-encryption.ts). The dev-only fallback

@@ -118,3 +118,62 @@ describe("POST /identity/connections/gmail/:sourceId/disconnect", () => {
     await app.close();
   });
 });
+
+// As with /start and /callback above, a real sync (a connected, tokened
+// source) would call the real googleOAuthClient/gmailApiClient singletons —
+// no way to inject fakes through HTTP. gmail-sync-service.test.ts covers
+// that behavior directly. This only covers what's reachable purely through
+// the HTTP layer: auth gating and the ownership/connection-state checks
+// getActiveGmailAccessToken performs before ever reaching Google.
+describe("POST /identity/connections/gmail/:sourceId/sync", () => {
+  it("rejects a missing session token", async () => {
+    const app = buildApp();
+    const response = await app.inject({
+      method: "POST",
+      url: `/identity/connections/gmail/${randomUUID()}/sync`,
+    });
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("404s for an unknown source id", async () => {
+    const app = buildApp();
+    const { sessionToken } = await registerAndLogin(app);
+    const response = await app.inject({
+      method: "POST",
+      url: `/identity/connections/gmail/${randomUUID()}/sync`,
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("403s when syncing a source owned by a different identity", async () => {
+    const app = buildApp();
+    const { identityId: identityA } = await registerAndLogin(app);
+    const { sessionToken: sessionB } = await registerAndLogin(app);
+    const source = await insertConnectedSource({ identityId: identityA, provider: "gmail" });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/identity/connections/gmail/${source.id}/sync`,
+      headers: { authorization: `Bearer ${sessionB}` },
+    });
+    expect(response.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("409s syncing a tokenless (never-connected) source you own", async () => {
+    const app = buildApp();
+    const { identityId, sessionToken } = await registerAndLogin(app);
+    const source = await insertConnectedSource({ identityId, provider: "gmail" });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/identity/connections/gmail/${source.id}/sync`,
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+    expect(response.statusCode).toBe(409);
+    await app.close();
+  });
+});

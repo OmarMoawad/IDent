@@ -3,6 +3,7 @@ import { ORIGIN } from "../identity/webauthn-config.js";
 import { extractBearerToken } from "../identity/http.js";
 import { validateSession } from "../identity/service.js";
 import {
+  ConnectedSourceNotConnectedError,
   ConnectedSourceNotFoundError,
   ConnectedSourceOwnershipError,
   OauthStateInvalidError,
@@ -10,10 +11,12 @@ import {
   disconnectGmailSource,
   startGmailConnection,
 } from "./gmail-service.js";
+import { syncGmailMessages } from "./gmail-sync-service.js";
 import { GoogleOAuthError } from "./google-oauth-client.js";
 
 type GmailCallbackQuery = { code?: string; state?: string; error?: string };
 type DisconnectParams = { sourceId: string };
+type SyncParams = { sourceId: string };
 
 export function registerGmailRoutes(app: FastifyInstance): void {
   app.post("/identity/connections/gmail/start", async (request, reply) => {
@@ -71,4 +74,25 @@ export function registerGmailRoutes(app: FastifyInstance): void {
       }
     },
   );
+
+  // Session 15: on-demand message sync — a user-triggered "Sync now"
+  // action, not a background poller (see gmail-sync-service.ts's header for
+  // why). Pulls the most recent GMAIL_SYNC_MAX_MESSAGES messages every
+  // call; upsertMessage's (sourceId, externalId) uniqueness (store.ts)
+  // makes repeated syncs idempotent rather than accumulating duplicates.
+  app.post<{ Params: SyncParams }>("/identity/connections/gmail/:sourceId/sync", async (request, reply) => {
+    const token = extractBearerToken(request.headers.authorization);
+    const identity = token ? await validateSession(token) : null;
+    if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
+
+    try {
+      const result = await syncGmailMessages(identity.identityId, request.params.sourceId);
+      return reply.code(200).send(result);
+    } catch (err) {
+      if (err instanceof ConnectedSourceNotFoundError) return reply.code(404).send({ error: err.message });
+      if (err instanceof ConnectedSourceOwnershipError) return reply.code(403).send({ error: err.message });
+      if (err instanceof ConnectedSourceNotConnectedError) return reply.code(409).send({ error: err.message });
+      throw err;
+    }
+  });
 }
