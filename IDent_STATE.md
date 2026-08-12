@@ -57,7 +57,7 @@ item 2.5's now-proven connector and session 14's `getActiveGmailAccessToken`
   (all reused from `gmail-service.ts`, nothing new to define) to
   404/403/409 respectively, registered in `gmail-routes.ts` alongside
   `/start`/`/callback`/`/disconnect`.
-- **12 new tests (123 total in the API workspace)**:
+- **8 new tests (115 total in the API workspace)**:
   `gmail-sync-service.test.ts` (4) exercises real sync/normalization logic
   against the fake Gmail API client — a full sync populating `subject`/
   `snippet`/`body`/`occurredAt`/`participants` correctly, re-sync updating
@@ -73,10 +73,58 @@ item 2.5's now-proven connector and session 14's `getActiveGmailAccessToken`
   isn't for `/start`, no way to inject a fake client through HTTP; the
   service-level tests are what cover that logic. No schema change needed
   this session — `messages`/`connected_sources` (session 13) already had
-  everything sync needed. `npm run typecheck`, `npm run test` (123
+  everything sync needed. `npm run typecheck`, `npm run test` (115
   passing), and `npm run build` all pass across every workspace. Still no
   UI to trigger a sync from — that's session 4 of this Phase 1 cadence
   ("Unified inbox UI"), which can now call this route once it exists.
+
+**Same-day follow-up (2026-08-12, still session 15): corrected this
+file's own test-count arithmetic, plus two real hardening gaps an
+external review found.** The commit message and this file both
+originally claimed "12 new tests (123 total)" — actually 8 new tests
+(4 + 4, listed above) against a real baseline of 107, i.e. 115 total;
+123 was simply arithmetic error, caught by re-deriving the baseline from
+the pre-session-15 commit directly rather than trusting a prior note.
+The commit message itself is left as-is (already pushed, not rewritten);
+this file and the fix below are the correction.
+
+1. **`RealGmailApiClient`'s Gmail-response normalization was untested.**
+   The original session only tested the fake client and the sync service
+   built on it — `gmail-api-client.ts`'s own MIME traversal, base64url
+   decoding, and missing-field handling had no direct coverage. Fixed by
+   exporting `toGmailMessage` (previously private) specifically for this,
+   following the exact convention `google-oauth-client.test.ts` already
+   documents: test the pure transform directly, exercise the
+   network-calling wrapper methods (`listMessageIds`/`getMessage`)
+   indirectly instead, through the fake double. New
+   `gmail-api-client.test.ts`, 10 tests: a top-level `text/plain` body, a
+   `text/plain` nested inside `multipart/alternative`, recursion through a
+   `multipart/mixed` wrapping a `multipart/alternative` (an attachment
+   alongside the real body), base64url decoding verified against the full
+   0-255 byte range specifically to exercise the `-`/`_` characters
+   standard base64 would instead spell `+`/`/` (a decoder that only
+   handled standard base64 would corrupt or reject this), no-body/
+   no-payload/missing-headers all returning honest nulls rather than
+   throwing, case-insensitive header lookup, and the `internalDate`
+   fallback landing within the actual call's timing window.
+2. **A malformed `internalDate` could abort a sync partway through,
+   after earlier messages in the same call already landed.**
+   `internalDate` is Gmail's own field, but still input crossing a trust
+   boundary, not something this codebase controls — an unparseable value
+   became `new Date(NaN)` ("Invalid Date"), which `upsertMessage`'s
+   Postgres write rejects, throwing out of the loop with no way to know
+   which earlier messages in the same call already committed. Fixed:
+   `gmail-sync-service.ts`'s new `parseInternalDate` falls back to `new
+   Date()` (now) when `Number(raw)` isn't finite — the message still
+   syncs, with an approximate date, instead of taking the rest of the
+   batch down with it. One new regression test: a three-message batch
+   with a malformed middle message proves all three still land (including
+   the one *after* the bad one), and the bad message's stored `occurredAt`
+   falls inside the actual call's timing window.
+
+11 more tests (126 total in the API workspace — 66 in `comms/` alone,
+up from 55). `npm run typecheck`, `npm run test`, and `npm run build` all
+pass across every workspace.
 
 Also from item 2.5 (2026-08-12): its real-browser Gmail OAuth
 click-through — done, with Omar, and it found a real bug; see the header
@@ -869,13 +917,22 @@ read.
   (`From`/`To` header → `{name?, address}[]`), `comms/gmail-sync-service.ts`
   (`syncGmailMessages`, built on session 14's `getActiveGmailAccessToken`
   and session 13's `upsertMessage`), new `POST /identity/connections/
-  gmail/:sourceId/sync` route. 12 new tests (123 total in the API
+  gmail/:sourceId/sync` route. 8 new tests (115 total in the API
   workspace) via `comms/test-support/fake-gmail-api-client.ts` (same role
   `FakeGoogleOAuthClient` plays for OAuth) plus route-level auth/
   ownership/connection-state tests that never call Google. No schema
   change — session 13's `messages`/`connected_sources` already had
   everything this needed. `npm run typecheck`, `npm run test`, and
   `npm run build` all pass across every workspace. No UI yet (session 4).
+  **Same-day follow-up**: corrected this entry's own test-count arithmetic
+  (was wrongly "12/123"), added direct unit tests for
+  `RealGmailApiClient`'s response normalization (`gmail-api-client.
+  test.ts`, 10 tests — exported `toGmailMessage` for this, following
+  `google-oauth-client.test.ts`'s "test the pure part directly" pattern),
+  and hardened `syncGmailMessages` against a malformed `internalDate`
+  (falls back to now instead of throwing partway through a batch, one new
+  regression test). 11 more tests (126 total). See header for the full
+  writeup.
 
 ## Architecture decisions made in this scaffold
 
@@ -1317,8 +1374,10 @@ UI before intelligence, mirroring how Phase 0B itself was built
 3. ~~**Message sync.**~~ — done in session 15 (see this file's header and
    "Completed components" above): on-demand `POST /identity/connections/
    gmail/:sourceId/sync`, `GmailApiClient` + fake, `comms/
-   gmail-sync-service.ts`, 12 tests. **Left open, not resolved this
-   session** (see header's "Design questions resolved first" note): what
+   gmail-sync-service.ts`, 19 tests (8 original + 11 same-day follow-up:
+   `RealGmailApiClient` normalization coverage + a malformed-timestamp
+   fallback). **Left open, not resolved this session** (see header's
+   "Design questions resolved first" note): what
    happens to a source stuck in `status: "connected"` whose access token
    turns out to be permanently unusable (revoked outside IDent, e.g. from
    Google's own account settings) — a sync currently just throws/fails per

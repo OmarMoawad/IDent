@@ -31,13 +31,13 @@ export class GmailApiError extends Error {
 
 const MESSAGES_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 
-type GmailHeader = { name: string; value: string };
-type GmailPart = {
+export type GmailHeader = { name: string; value: string };
+export type GmailPart = {
   mimeType?: string;
   body?: { data?: string };
   parts?: GmailPart[];
 };
-type GmailMessageResource = {
+export type GmailMessageResource = {
   id: string;
   snippet?: string;
   internalDate?: string;
@@ -78,7 +78,16 @@ function findPlainTextBody(part: GmailPart | undefined): string | null {
   return null;
 }
 
-function toGmailMessage(resource: GmailMessageResource): GmailMessage {
+/**
+ * The pure Gmail-response-shape → GmailMessage transform — exported
+ * specifically so it's directly unit-testable (MIME traversal, base64url
+ * decoding, missing-field handling) without mocking `fetch`, the same
+ * "only test the pure part directly" convention google-oauth-client.
+ * test.ts already documents for RealGoogleOAuthClient.getAuthorizationUrl
+ * (network-calling methods there are exercised indirectly instead,
+ * through the fake client double).
+ */
+export function toGmailMessage(resource: GmailMessageResource): GmailMessage {
   const headers = resource.payload?.headers;
   const bodyText =
     resource.payload?.mimeType === "text/plain" && resource.payload.body?.data

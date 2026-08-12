@@ -122,4 +122,37 @@ describe("gmail-sync-service: syncGmailMessages", () => {
 
     await app.close();
   });
+
+  it("a malformed internalDate falls back to now instead of aborting the whole sync", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const oauthClient = new FakeGoogleOAuthClient();
+    const source = await connectSource(app, identityId, oauthClient);
+
+    const apiClient = new FakeGmailApiClient();
+    apiClient.messages = [
+      fakeGmailMessage({ id: "msg-good-before", internalDate: "1700000000000" }),
+      fakeGmailMessage({ id: "msg-bad", internalDate: "not-a-timestamp" }),
+      fakeGmailMessage({ id: "msg-good-after", internalDate: "1700000200000" }),
+    ];
+
+    const before = Date.now();
+    const result = await syncGmailMessages(identityId, source.id, oauthClient, apiClient);
+    const after = Date.now();
+
+    expect(result).toEqual({ sourceId: source.id, messagesSeen: 3, messagesUpserted: 3 });
+    const stored = await findMessagesByIdentity(identityId);
+    expect(stored.map((m) => m.externalId).sort()).toEqual(["msg-bad", "msg-good-after", "msg-good-before"]);
+
+    const bad = stored.find((m) => m.externalId === "msg-bad")!;
+    expect(bad.occurredAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(bad.occurredAt.getTime()).toBeLessThanOrEqual(after);
+
+    // The message after the malformed one still got upserted too — proves
+    // the fallback keeps the loop going rather than the whole sync call
+    // throwing partway through.
+    expect(stored.find((m) => m.externalId === "msg-good-after")).toBeTruthy();
+
+    await app.close();
+  });
 });

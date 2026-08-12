@@ -12,6 +12,22 @@ export type SyncGmailMessagesResult = {
 };
 
 /**
+ * `internalDate` is Gmail's own field (epoch milliseconds, as a string) —
+ * normally always numeric, but it's still attacker/provider-controlled
+ * input crossing a trust boundary, not a value this codebase produced.
+ * An unparseable value would otherwise become `new Date(NaN)` ("Invalid
+ * Date"), which upsertMessage's Postgres write rejects — aborting the
+ * whole sync loop mid-way, after any earlier messages in this same call
+ * already landed. Falling back to "now" keeps one bad message from taking
+ * down the rest of the batch; the message itself is still synced (with an
+ * approximate date), not silently dropped.
+ */
+function parseInternalDate(raw: string): Date {
+  const millis = Number(raw);
+  return Number.isFinite(millis) ? new Date(millis) : new Date();
+}
+
+/**
  * Pulls the most recent GMAIL_SYNC_MAX_MESSAGES messages from a connected
  * Gmail source and normalizes them into the shared `messages` table.
  * On-demand, not a background poller — a single call does one list + up to
@@ -50,7 +66,7 @@ export async function syncGmailMessages(
         from: parseParticipants(gmailMessage.from),
         to: parseParticipants(gmailMessage.to),
       }),
-      occurredAt: new Date(Number(gmailMessage.internalDate)),
+      occurredAt: parseInternalDate(gmailMessage.internalDate),
     });
   }
 
