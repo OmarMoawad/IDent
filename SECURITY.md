@@ -247,6 +247,56 @@ more expensive to build well. Treat it as a possible future "local mode"
 option once there's revenue to justify it, not a Phase 1 baseline promise —
 promising it early and not delivering it is worse than not promising it.
 
+### What session 18 actually built (2026-08-13)
+
+The provider is **Anthropic's Claude API** (`claude-opus-5`), decided with
+Omar rather than defaulted to — the deciding factor was that Anthropic's
+business-API terms do not train on inputs by default, which is precisely
+the contractual term the bullet above says must not be assumed.
+
+The egress decision was **"send only what's needed, and disclose it"**, and
+it is enforced in code rather than by policy. `assistant/
+assistant-retrieval.ts` is the whole privacy boundary:
+
+- The assistant never receives the mailbox. It receives at most 12
+  messages, 10 events, 10 contacts, and 10 reminders, each truncated to
+  1,200 characters, selected by keyword relevance to the question asked.
+- Anything that function does not return cannot reach the provider. Tests
+  assert the negative directly — that an unrelated message's body is *not*
+  present in the outbound payload, and that one identity's data never
+  appears in another's request.
+- Every answer reports `contextSent` counts, so the UI can tell the user
+  exactly how much of their data left the server for that question.
+- `GET /identity/assistant/status` names the provider and model before the
+  user asks anything, so the disclosure is available up front rather than
+  buried here.
+
+**Still true and still not claimed:** the provider processes each query
+transiently. The accurate user-facing sentence remains the one above —
+"processed transiently under a no-retention, no-training agreement" — not
+"never leaves IDent".
+
+**Prompt injection.** The retrieved context is other people's email, so it
+is untrusted input. It is wrapped and labelled as quoted data, and the
+system prompt instructs the model to report rather than obey any
+instruction found inside it. This is a mitigation, not a guarantee: a
+sufficiently clever injection may still influence a response. The
+structural protection is that the assistant is **read-only by
+construction** — there is no code path from a model response back into the
+database, so even a fully successful injection cannot send, edit, or
+delete anything.
+
+### Importance filtering (session 19)
+
+ROADMAP.md requires this filter be negotiated rather than silent, and the
+implementation is shaped by that: priorities are a *separate annotation*
+exposed on their own endpoint, never a filter applied to the message list —
+a client that ignores the feature entirely sees every message unchanged.
+Every call carries a human-readable reason; the classifier is a transparent
+heuristic rather than a model call, precisely so the reason is real. A
+user's stated preference (a per-contact or per-source rule) overrides the
+guess, and an explicit per-message override survives re-classification.
+
 ## Incident response principle
 
 Because each trust tier has its own key domain, a credible response to "your

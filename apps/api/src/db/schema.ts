@@ -492,3 +492,71 @@ export const reminders = pgTable(
   },
   (table) => [index("reminders_identity_due_at_idx").on(table.identityId, table.dueAt)],
 );
+
+/**
+ * Phase 1 session 19 — AI-assisted importance filtering.
+ *
+ * ROADMAP.md's constraints on this feature are unusually specific, and the
+ * schema is shaped by them rather than by what would be simplest:
+ *
+ * - **Nothing is hidden or deleted.** This table annotates messages; it
+ *   never filters them. A "low" priority is a label the inbox can sort or
+ *   de-emphasize by, and the message stays in every listing.
+ * - **The user can see why.** `reason` is required — an unexplained
+ *   priority call is exactly the silent filtering the roadmap forbids.
+ * - **Provenance is explicit.** `assignedBy` distinguishes the
+ *   assistant's guess from the user's own override and from a rule the
+ *   user wrote, so the UI can show which is which and the user can
+ *   override any of the three.
+ */
+export const messagePriorities = pgTable(
+  "message_priorities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    // "high" | "normal" | "low" — deliberately coarse. A numeric score
+    // would invite a hidden threshold; three named bands stay explainable.
+    level: text("level").notNull(),
+    reason: text("reason").notNull(),
+    // "assistant" | "user" | "rule"
+    assignedBy: text("assigned_by").notNull(),
+    // Set when a rule produced this, so the UI can offer "change the rule"
+    // alongside "change this one" — the roadmap requires both.
+    ruleId: uuid("rule_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("message_priorities_message_idx").on(table.messageId),
+    index("message_priorities_identity_level_idx").on(table.identityId, table.level),
+  ],
+);
+
+/**
+ * A user-stated preference about what matters, per contact or per source.
+ * These are the "stated preferences" ROADMAP.md says the assistant must
+ * defer to when the two conflict — enforced in importance-service.ts by
+ * applying rules *after* the assistant's pass, overwriting it.
+ */
+export const priorityRules = pgTable(
+  "priority_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    // "contact" (match a participant address) | "source" (match a connected source)
+    matchType: text("match_type").notNull(),
+    matchValue: text("match_value").notNull(),
+    level: text("level").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("priority_rules_identity_match_idx").on(table.identityId, table.matchType, table.matchValue),
+    index("priority_rules_identity_idx").on(table.identityId),
+  ],
+);

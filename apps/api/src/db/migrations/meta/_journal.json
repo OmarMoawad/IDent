@@ -92,6 +92,13 @@
       "when": 1786631140077,
       "tag": "0012_whole_young_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786631677528,
+      "tag": "0013_loud_shaman",
+      "breakpoints": true
     }
   ]
 }
