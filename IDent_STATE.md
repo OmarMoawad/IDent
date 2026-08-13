@@ -46,10 +46,17 @@ entry point itself. There is now a test that clicks the button.
 239 tests (208 API + 31 web), workspace typecheck, and production build
 all pass.
 
+**Phase 2 is now re-baselined** (8 sessions, at the end of this file).
+Session 1 — extracting the Gmail-shaped OAuth lifecycle into a provider
+registry — needs no accounts and is what makes Slack, Notion, and Drive
+cheap rather than three copies of the same flow.
+
 **Still not verified:** no real Anthropic key and no real Google OAuth
-client, so neither integration is proven against a live provider; and
-real-browser click-through of the new pages is pending. **Phase 2 is not
-re-baselined** — that is the next session's first task.
+client exist, so neither integration is proven against a live provider.
+Both need Omar to create them (console.anthropic.com and Google Cloud
+Console respectively); the code paths are complete and fail closed
+without them. Real-browser click-through of the new pages is also
+pending.
 
 Previously — **Sessions 17b, 18 and 19 done: Phase 1's
 Communications Hub cadence is complete (8/8).**
@@ -1684,6 +1691,93 @@ revised once mid-flight.
 elevation is enforced" burden instead. Not urgent, not part of the Phase 1
 sequence above — do it alongside whichever Phase 3+ slice adds the first
 real High/Critical route.
+
+## Session cadence for Phase 2 — re-baselined 2026-08-13
+
+Phase 2 is "Productivity & Real-Time Comms" (ROADMAP.md), and its exit
+criteria is narrower than its bullet list: *"IDent can replace day-to-day
+switching between chat, calendar, and drive apps for non-sensitive
+workflows."* Chat, calendar, drive. Video and voice are listed in the
+phase but are not what the exit criteria measures, so they sit at the tail
+where a delay doesn't block the phase from being usable.
+
+Ordered so the first session is fully unblocked and each later one has a
+reason to come after the one before it.
+
+1. **Connector abstraction — do this first, before any new provider.**
+   The OAuth lifecycle is currently Gmail-shaped: `gmail-service.ts`
+   owns connect/refresh/disconnect, and `google-oauth-client.ts` hardcodes
+   Google's endpoints and scopes. `connected_sources` is already generic,
+   so the table is fine — the *flow* is not. Adding Slack and Notion
+   before extracting a provider registry means writing the state/PKCE/
+   token-refresh dance three times and fixing every future bug three
+   times. No new user-facing behaviour; the test for success is that the
+   Gmail connector still passes its existing suite unchanged after moving
+   behind the new interface. Fully buildable solo.
+
+2. **Slack integration.** Messages and notifications into the unified
+   inbox, reusing session 20's `kind` discriminator rather than inventing
+   a third shape. **Needs Omar**: a Slack app (api.slack.com/apps) and its
+   OAuth client id/secret. Scope should be read-only to start, matching
+   the Gmail precedent — `channels:history`, `users:read`, nothing that
+   can post.
+
+3. **Notion integration.** Pages and updates as searchable content. Notion
+   is a different shape from mail — documents, not a stream — so the open
+   question this session must answer is whether pages belong in `messages`
+   at all or need their own table. Resist the reflex to reuse `messages`
+   just because session 20 did: a notification genuinely *is* a message-
+   shaped event, and a wiki page is not. **Needs Omar**: a Notion internal
+   integration token.
+
+4. **Drive aggregation (read + search).** Google Drive first, since the
+   Google connection already exists and this is one more scope on it —
+   the same second-scope pattern session 17b established for Calendar,
+   including the stale-grant reconnect prompt. Search across connected
+   drives is the actual deliverable; a file list is not. **Needs Omar**:
+   adding `drive.readonly` to the existing OAuth client's consent screen.
+
+5. **Assistant write actions, with per-action confirmation.** The
+   highest-risk session in the phase, and the reason it comes after the
+   connectors rather than before: today the assistant's structural
+   protection against prompt injection is that **no code path leads from a
+   model response back into the database** (see SECURITY.md). This session
+   deliberately removes that protection, so the confirmation gate replaces
+   it and must be real — *server-enforced*, with the action persisted as
+   pending and executed only on a separate authenticated request from the
+   user. A UI-only confirmation is not a control; it is a dialog box in
+   front of an open door. Write the injection test first: a message whose
+   body asks the assistant to send mail must produce, at most, a pending
+   action the user has to approve. The confirmation architecture is
+   buildable and testable solo with a fake; **needs Omar** only for the
+   send scope on the Google client when it comes time to actually deliver.
+
+6. **Personal storage node.** ROADMAP.md is careful here and so should
+   this session be: a sync app for the user's *own* hardware acting as a
+   personal node, explicitly **not** unlimited free cloud storage (see
+   SECURITY.md for why that promise doesn't hold). The design question to
+   settle before writing code is what happens when the node is offline,
+   because that answer determines whether this is a sync protocol or a
+   cache.
+
+7. **Video calls.** **Needs Omar**: a provider decision with real cost
+   implications — self-hosted WebRTC (cheapest per-minute, most operational
+   work, TURN servers to run) versus a hosted SFU such as LiveKit or Daily
+   (fast to ship, per-participant-minute billing that scales with success).
+   Do not default to one silently; this is the same class of decision as
+   session 18's LLM provider.
+
+8. **Voice calling across carrier/VoIP channels.** The heaviest item in
+   the phase and correctly last. **Needs Omar**: a carrier/VoIP provider,
+   and — unlike everything above — genuine regulatory homework (number
+   provisioning, emergency-calling obligations, per-jurisdiction rules).
+   BOOTSTRAP.md's "what isn't zero-capital" section already flags
+   regulatory cost as the thing AI-assisted development doesn't remove.
+   Phase 2's exit criteria does not depend on this session, so it can slip
+   without blocking the phase.
+
+**Nothing here is blocked from starting**: session 1 needs no accounts at
+all, and it is the session that makes 2, 3 and 4 cheap.
 
 ## Deployment instructions
 
