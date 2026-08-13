@@ -126,11 +126,21 @@ export function registerCalendarRoutes(app: FastifyInstance): void {
         return reply.code(400).send({ error: `Notes must be ${MAX_NOTES_LENGTH} characters or fewer.` });
       }
 
+      // A supplied-but-unparseable date is a client error, not a reminder
+      // with no due date: silently dropping it means the user sets a
+      // deadline, gets a 201, and never hears about it again.
+      const rawDueAt = request.body?.dueAt;
+      const suppliedDueAt = typeof rawDueAt === "string" && rawDueAt.trim() !== "";
+      const dueAt = parseDate(rawDueAt);
+      if (suppliedDueAt && !dueAt) {
+        return reply.code(400).send({ error: "dueAt must be a valid date." });
+      }
+
       const reminder = await insertReminder({
         identityId: identity.identityId,
         title,
         notes: notes || null,
-        dueAt: parseDate(request.body?.dueAt),
+        dueAt,
       });
       return reply.code(201).send(publicReminder(reminder));
     },

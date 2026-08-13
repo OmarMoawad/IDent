@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, ilike, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { connectedSources, messages, oauthStateChallenges } from "../db/schema.js";
 
@@ -80,6 +80,20 @@ export async function findConnectedSourceByProviderAccount(
     .limit(1);
   return rows[0] ?? null;
 }
+
+const messageColumns = {
+  id: messages.id,
+  identityId: messages.identityId,
+  sourceId: messages.sourceId,
+  externalId: messages.externalId,
+  subject: messages.subject,
+  snippet: messages.snippet,
+  body: messages.body,
+  participants: messages.participants,
+  occurredAt: messages.occurredAt,
+  isRead: messages.isRead,
+  createdAt: messages.createdAt,
+};
 
 export type NewMessage = {
   identityId: string;
@@ -326,4 +340,47 @@ export async function consumeOauthStateChallenge(state: string): Promise<Consume
 
     return { identityId: pending.identityId, provider: pending.provider, pkceVerifier: pending.pkceVerifier };
   });
+}
+
+const CLASSIFY_BATCH_SIZE = 500;
+/** Matches contacts-store.ts's ceiling; see the note there. */
+const MAX_CLASSIFY_MESSAGES = 50_000;
+
+/**
+ * Every message for an identity, oldest-first, for whole-mailbox passes.
+ *
+ * Deliberately separate from findMessagesByIdentity, which caps at 100 for
+ * the inbox read path. Importance classification used that capped query
+ * and therefore silently ignored everything older than the newest 100 —
+ * the same mistake contact derivation made and had to be corrected for.
+ * Keyset-batched on (occurredAt, id) so it is stable under concurrent
+ * inserts.
+ */
+export async function findAllMessagesByIdentity(identityId: string): Promise<Message[]> {
+  const rows: Message[] = [];
+  let cursor: { occurredAt: Date; id: string } | null = null;
+
+  while (rows.length < MAX_CLASSIFY_MESSAGES) {
+    const page: Message[] = await db
+      .select(messageColumns)
+      .from(messages)
+      .where(
+        cursor
+          ? and(
+              eq(messages.identityId, identityId),
+              sql`(${messages.occurredAt}, ${messages.id}) > (${cursor.occurredAt}, ${cursor.id})`,
+            )
+          : eq(messages.identityId, identityId),
+      )
+      .orderBy(asc(messages.occurredAt), asc(messages.id))
+      .limit(CLASSIFY_BATCH_SIZE);
+
+    if (page.length === 0) break;
+    rows.push(...page);
+    if (page.length < CLASSIFY_BATCH_SIZE) break;
+    const last = page[page.length - 1];
+    cursor = { occurredAt: last.occurredAt, id: last.id };
+  }
+
+  return rows;
 }

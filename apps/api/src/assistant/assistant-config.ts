@@ -10,8 +10,21 @@
  * weakest link in any "assistant over your inbox" story.
  */
 
-/** Latest and most capable Claude model at time of writing. */
-export const ASSISTANT_MODEL = "claude-opus-5";
+/**
+ * The model, overridable without a code change.
+ *
+ * Default `claude-opus-5` — verified against the installed
+ * `@anthropic-ai/sdk` (0.116.0), whose model union contains it. A review
+ * queried whether this identifier is real and suggested
+ * `claude-opus-4-20250514` instead; that string is *not* in the current
+ * SDK's union, and the Opus 4 series is the deprecated one. Recorded here
+ * so the question isn't re-litigated from stale documentation.
+ *
+ * **Not smoke-tested against the live API** — no key has been used. That
+ * gate is tracked in IDent_STATE.md, and this env var exists partly so it
+ * can be changed without a deploy if the default ever proves wrong.
+ */
+export const ASSISTANT_MODEL = process.env.ANTHROPIC_MODEL?.trim() || "claude-opus-5";
 
 /**
  * Bounded so one question cannot ship an entire mailbox to a third party.

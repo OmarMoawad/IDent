@@ -32,12 +32,46 @@ Communications Hub cadence is complete (8/8).**
   stated rule beats the guess, and a per-message override survives
   re-classification.
 
-203 tests (187 API + 16 web), workspace typecheck, and production build all
-pass. **Not verified:** no real Anthropic API key has been used — the
-assistant is covered by a fake client only — and real-browser click-through
-of `/contacts`, the calendar, and the assistant is still pending. Phase 1's
-cadence is complete; **Phase 2 is not re-baselined yet**, and that is the
-next session's first task.
+**Review fixes, 2026-08-13.** A review caught five real defects in these
+three sessions, all now fixed with regression tests:
+
+- **Importance classification only ever saw the newest 100 messages** — the
+  same capped-window mistake contact derivation made and had to be
+  corrected for. An older owned message could never be classified, and
+  overriding it returned a misleading 404 for mail the user can plainly
+  see. Classification now runs over the whole mailbox (keyset-batched), and
+  the override does a direct identity-scoped lookup.
+- **Priority rules didn't validate their targets**, so a rule could name a
+  nonexistent or foreign source and silently never match — the user
+  believes they tuned something and nothing changes, which is precisely the
+  un-negotiated behaviour this feature exists to avoid.
+- **Assistant provider errors were logged whole.** An SDK error carries
+  request/response metadata, and this request's body is the person's
+  retrieved inbox. Now only class, status, and the provider request id.
+- **An invalid `dueAt` silently became "no due date"** with a 201 — the
+  user sets a deadline and never hears about it again. Now a 400.
+- **The model is configurable** via `ANTHROPIC_MODEL`.
+
+One review finding was factually wrong and is recorded so it isn't
+re-litigated: it claimed `claude-opus-5` is not a valid identifier and
+suggested `claude-opus-4-20250514`. The installed `@anthropic-ai/sdk`
+(0.116.0) contains `claude-opus-5` in its model union and does **not**
+contain that suggestion; the Opus 4 series is the deprecated one.
+
+**The UI now exists (the review was right that it didn't).** Sessions
+17b–19 were backend-only, which made "cadence complete" premature. Added:
+`/calendar` (events + reminder create/complete/delete), `/assistant` (with
+the `contextSent` disclosure actually rendered — an API field nobody
+displays is not a disclosure), and importance controls in the inbox
+showing each priority with its reason plus both overrides the roadmap
+requires. 26 web tests, up from 16.
+
+219 tests (193 API + 26 web), workspace typecheck, and production build all
+pass. **Still not verified:** no real Anthropic API key has been used — the
+assistant is covered by a fake client only, so "it will work once the key
+is set" remains a claim, not a demonstration — and real-browser
+click-through of the new pages is pending. **Phase 2 is not re-baselined
+yet**, and that is the next session's first task.
 
 Previously — **Session 17 done**: contact cards, the fifth
 slice of **Phase 1: Communications Hub**. A new `contacts` table holds one

@@ -44,9 +44,20 @@ export function registerAssistantRoutes(
       if (error instanceof AssistantUnavailableError) {
         return reply.code(503).send({ error: "The assistant is not configured." });
       }
-      // Never surface a provider error verbatim — it can echo request
-      // content, which here is the person's own mail.
-      request.log.error({ err: error }, "assistant request failed");
+      // Never surface a provider error verbatim, and never *log* it
+      // whole either: an SDK error carries request/response metadata, and
+      // this request's body is the person's retrieved inbox. Log only the
+      // fields needed to diagnose a failure — class, status, and the
+      // provider's request id, which is the useful one for support.
+      const sdkError = error as { name?: string; status?: number; request_id?: string };
+      request.log.error(
+        {
+          errorName: typeof sdkError?.name === "string" ? sdkError.name : "Unknown",
+          status: typeof sdkError?.status === "number" ? sdkError.status : undefined,
+          providerRequestId: typeof sdkError?.request_id === "string" ? sdkError.request_id : undefined,
+        },
+        "assistant request failed",
+      );
       return reply.code(502).send({ error: "The assistant could not answer right now." });
     }
   });

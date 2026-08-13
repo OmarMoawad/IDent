@@ -2,7 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { parseMessageParticipants, participantKey } from "@ident/shared";
 import { db } from "../db/client.js";
 import { messagePriorities, priorityRules } from "../db/schema.js";
-import { findMessagesByIdentity, type Message } from "../comms/store.js";
+import { findAllMessagesByIdentity, findMessageByIdForIdentity, type Message } from "../comms/store.js";
 
 /**
  * Phase 1 session 19 — negotiated importance filtering.
@@ -119,7 +119,10 @@ export type ClassifyResult = { classified: number; byLevel: Record<PriorityLevel
  */
 export async function classifyMessagesForIdentity(identityId: string): Promise<ClassifyResult> {
   const [messages, rules, existing] = await Promise.all([
-    findMessagesByIdentity(identityId, { limit: 100 }),
+    // Whole mailbox, not the inbox's newest-100 window: a message older
+    // than that window could otherwise never be classified, and would keep
+    // a stale priority forever when a rule changed.
+    findAllMessagesByIdentity(identityId),
     findPriorityRules(identityId),
     db
       .select({ messageId: messagePriorities.messageId, assignedBy: messagePriorities.assignedBy })
@@ -192,10 +195,10 @@ export async function overrideMessagePriority(
   messageId: string,
   level: PriorityLevel,
 ): Promise<boolean> {
-  // Scoped insert: the message must belong to this identity, so a guessed
-  // id from another tenant writes nothing.
-  const owned = await findMessagesByIdentity(identityId, { limit: 100 });
-  if (!owned.some((message) => message.id === messageId)) return false;
+  // Direct identity-scoped lookup rather than scanning the newest 100:
+  // that made an older owned message un-overridable and returned a
+  // misleading 404 for a message the person can plainly see.
+  if (!(await findMessageByIdForIdentity(messageId, identityId))) return false;
 
   await db
     .insert(messagePriorities)

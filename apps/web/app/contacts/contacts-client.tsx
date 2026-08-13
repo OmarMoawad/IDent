@@ -119,6 +119,8 @@ export function ContactsClient() {
         </div>
         <nav aria-label="Primary">
           <Link href="/inbox">Inbox</Link>
+          <Link href="/calendar">Calendar</Link>
+          <Link href="/assistant">Assistant</Link>
           <Link href="/contacts">Contacts</Link>
           <Link href="/account">Account</Link>
         </nav>

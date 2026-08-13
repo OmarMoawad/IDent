@@ -32,7 +32,7 @@ describe("InboxClient", () => {
   });
 
   it("offers Gmail connection when no sources exist", async () => {
-    apiGet.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     render(<InboxClient />);
     expect(await screen.findByText("Connect Gmail to bring messages into IDent.")).toBeInTheDocument();
     apiPost.mockImplementation(() => new Promise(() => undefined));
@@ -42,7 +42,7 @@ describe("InboxClient", () => {
 
   it("says so when contacts could not be refreshed after an otherwise good sync", async () => {
     const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     render(<InboxClient />);
     await screen.findByRole("button", { name: "Sync now" });
 
@@ -61,7 +61,7 @@ describe("InboxClient", () => {
 
   it("reports a plain success when both sync and the contact refresh work", async () => {
     const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     render(<InboxClient />);
     await screen.findByRole("button", { name: "Sync now" });
 
@@ -84,7 +84,7 @@ describe("InboxClient", () => {
       to: [{ address: "me@example.com" }],
     });
     const message = { id: "message-1", subject: "Project Atlas", snippet: "Latest update", body: null, participants, occurredAt: "2026-08-13T10:00:00Z", isRead: false, source };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]);
     render(<InboxClient />);
     expect(await screen.findByText("Jane Doe")).toBeInTheDocument();
     expect(screen.queryByText("Unknown sender")).not.toBeInTheDocument();
@@ -93,7 +93,7 @@ describe("InboxClient", () => {
   it("still says Unknown sender when a message genuinely has no usable participants", async () => {
     const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
     const message = { id: "message-1", subject: "Project Atlas", snippet: null, body: null, participants: "not json", occurredAt: "2026-08-13T10:00:00Z", isRead: false, source };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]);
     render(<InboxClient />);
     expect(await screen.findByText("Unknown sender")).toBeInTheDocument();
   });
@@ -101,7 +101,7 @@ describe("InboxClient", () => {
   it("renders, searches, reads plain text, and preserves the list on sync failure", async () => {
     const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
     const message = { id: "message-1", subject: "Project Atlas", snippet: "Latest update", body: null, participants: null, occurredAt: "2026-08-13T10:00:00Z", isRead: false, source };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]);
     render(<InboxClient />);
     expect(await screen.findByText("Project Atlas")).toBeInTheDocument();
     expect(screen.getByText("Unread")).toBeInTheDocument();
@@ -124,5 +124,86 @@ describe("InboxClient", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Token revoked");
     expect(screen.getAllByText("Project Atlas")).not.toHaveLength(0);
+  });
+});
+
+describe("importance controls (session 19)", () => {
+  const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
+  const message = {
+    id: "m1",
+    subject: "Newsletter",
+    snippet: "unsubscribe",
+    body: null,
+    isRead: true,
+    occurredAt: "2026-08-01T10:00:00.000Z",
+    participants: JSON.stringify({ from: [{ address: "digest@example.com" }], to: [] }),
+    source,
+  };
+
+  it("shows the priority and its reason without hiding the message", async () => {
+    apiGet
+      .mockResolvedValueOnce([source])
+      .mockResolvedValueOnce([message])
+      .mockResolvedValueOnce([
+        { messageId: "m1", level: "low", reason: "Looks like bulk mail.", assignedBy: "assistant" },
+      ]);
+    render(<InboxClient />);
+
+    // The label is visible AND the message is still listed — the whole
+    // point of a negotiated filter rather than a silent one.
+    expect(await screen.findByText(/Priority: low — Looks like bulk mail\./)).toBeInTheDocument();
+    expect(screen.getByText("Newsletter")).toBeInTheDocument();
+  });
+
+  it("lets the user override one call", async () => {
+    apiGet
+      .mockResolvedValueOnce([source])
+      .mockResolvedValueOnce([message])
+      .mockResolvedValueOnce([
+        { messageId: "m1", level: "low", reason: "Looks like bulk mail.", assignedBy: "assistant" },
+      ]);
+    render(<InboxClient />);
+    await screen.findByText("Newsletter");
+
+    apiGet.mockResolvedValueOnce(message);
+    fireEvent.click(screen.getByRole("button", { name: /Newsletter/ }));
+    const markHigh = await screen.findByRole("button", { name: "Mark high" });
+
+    apiPost.mockResolvedValueOnce({});
+    apiGet.mockResolvedValueOnce([
+      { messageId: "m1", level: "high", reason: "You set this priority yourself.", assignedBy: "user" },
+    ]);
+    fireEvent.click(markHigh);
+
+    await waitFor(() =>
+      expect(apiPost).toHaveBeenCalledWith("/identity/priorities/m1", { level: "high" }, "token"),
+    );
+  });
+
+  it("lets the user change the rule behind the call, not just the one message", async () => {
+    apiGet
+      .mockResolvedValueOnce([source])
+      .mockResolvedValueOnce([message])
+      .mockResolvedValueOnce([
+        { messageId: "m1", level: "low", reason: "Looks like bulk mail.", assignedBy: "assistant" },
+      ]);
+    render(<InboxClient />);
+    await screen.findByText("Newsletter");
+
+    apiGet.mockResolvedValueOnce(message);
+    fireEvent.click(screen.getByRole("button", { name: /Newsletter/ }));
+    const always = await screen.findByRole("button", { name: "Always prioritize this sender" });
+
+    apiPost.mockResolvedValue({});
+    apiGet.mockResolvedValue([]);
+    fireEvent.click(always);
+
+    await waitFor(() =>
+      expect(apiPost).toHaveBeenCalledWith(
+        "/identity/priority-rules",
+        { matchType: "contact", matchValue: "digest@example.com", level: "high" },
+        "token",
+      ),
+    );
   });
 });

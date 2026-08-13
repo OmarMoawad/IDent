@@ -39,3 +39,7 @@ export function apiPost<T>(path: string, body: unknown, token?: string): Promise
 export function apiPut<T>(path: string, body: unknown, token?: string): Promise<T> {
   return request<T>(path, { method: "PUT", body: JSON.stringify(body), headers: authHeaders(token) });
 }
+
+export function apiDelete(path: string, token?: string): Promise<void> {
+  return request<void>(path, { method: "DELETE", headers: authHeaders(token) });
+}

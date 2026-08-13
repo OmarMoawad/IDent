@@ -254,3 +254,111 @@ describe("importance routes", () => {
     await app.close();
   });
 });
+
+describe("review findings 5 & 6", () => {
+  it("classifies and overrides a message older than the newest 100", async () => {
+    // Finding 5: classification read the inbox's capped query, so an older
+    // owned message could never be classified and could not be overridden
+    // — the API returned a misleading 404 for mail the user can plainly see.
+    const app = buildApp();
+    const identity = await register(app);
+    const source = await insertConnectedSource({ identityId: identity.identityId, provider: "gmail" });
+
+    const oldest = await upsertMessage({
+      identityId: identity.identityId,
+      sourceId: source.id,
+      externalId: "ancient",
+      subject: "Ancient invoice",
+      participants: participants("billing@example.com"),
+      occurredAt: new Date("2020-01-01T00:00:00Z"),
+    });
+    for (let index = 0; index < 120; index++) {
+      await upsertMessage({
+        identityId: identity.identityId,
+        sourceId: source.id,
+        externalId: `recent-${index}`,
+        subject: `Recent ${index}`,
+        participants: participants("someone@example.com"),
+        occurredAt: new Date(Date.UTC(2026, 0, 1, 0, index)),
+      });
+    }
+
+    const classify = await app.inject({
+      method: "POST",
+      url: "/identity/priorities/classify",
+      headers: bearer(identity.sessionToken),
+    });
+    expect(classify.json().classified).toBe(121);
+
+    const priorities = await app.inject({
+      method: "GET",
+      url: "/identity/priorities",
+      headers: bearer(identity.sessionToken),
+    });
+    expect(priorities.json().some((p: { messageId: string }) => p.messageId === oldest.id)).toBe(true);
+
+    // And it can be overridden rather than 404ing.
+    const override = await app.inject({
+      method: "POST",
+      url: `/identity/priorities/${oldest.id}`,
+      headers: bearer(identity.sessionToken),
+      payload: { level: "high" },
+    });
+    expect(override.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("rejects a contact rule that is not an email address", async () => {
+    const app = buildApp();
+    const identity = await register(app);
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/priority-rules",
+      headers: bearer(identity.sessionToken),
+      payload: { matchType: "contact", matchValue: "not-an-address", level: "low" },
+    });
+    expect(response.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("rejects an oversized matchValue", async () => {
+    const app = buildApp();
+    const identity = await register(app);
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/priority-rules",
+      headers: bearer(identity.sessionToken),
+      payload: { matchType: "contact", matchValue: `${"x".repeat(320)}@example.com`, level: "low" },
+    });
+    expect(response.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("rejects a source rule pointing at a source the identity does not own", async () => {
+    // Finding 6: a dead rule silently never matches, so the user believes
+    // they've tuned something and nothing changes.
+    const app = buildApp();
+    const alice = await register(app);
+    const bob = await register(app);
+    const bobSource = await insertConnectedSource({ identityId: bob.identityId, provider: "gmail" });
+
+    const foreign = await app.inject({
+      method: "POST",
+      url: "/identity/priority-rules",
+      headers: bearer(alice.sessionToken),
+      payload: { matchType: "source", matchValue: bobSource.id, level: "low" },
+    });
+    expect(foreign.statusCode).toBe(404);
+
+    // Alice's own source is accepted.
+    const own = await insertConnectedSource({ identityId: alice.identityId, provider: "gmail" });
+    const valid = await app.inject({
+      method: "POST",
+      url: "/identity/priority-rules",
+      headers: bearer(alice.sessionToken),
+      payload: { matchType: "source", matchValue: own.id, level: "low" },
+    });
+    expect(valid.statusCode).toBe(201);
+    await app.close();
+  });
+});

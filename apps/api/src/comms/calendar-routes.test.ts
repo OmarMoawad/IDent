@@ -273,3 +273,36 @@ describe("reminders", () => {
     await app.close();
   });
 });
+
+describe("reminder dueAt validation (review finding 8)", () => {
+  it("rejects a supplied-but-invalid dueAt instead of silently dropping it", async () => {
+    const app = buildApp();
+    const identity = await register(app);
+    const response = await app.inject({
+      method: "POST",
+      url: "/identity/reminders",
+      headers: bearer(identity.sessionToken),
+      payload: { title: "Renew passport", dueAt: "next tuesday" },
+    });
+    // Previously this returned 201 with dueAt: null — the user sets a
+    // deadline and never hears about it again.
+    expect(response.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("still allows an omitted or empty dueAt", async () => {
+    const app = buildApp();
+    const identity = await register(app);
+    for (const payload of [{ title: "No date" }, { title: "Empty date", dueAt: "" }]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/identity/reminders",
+        headers: bearer(identity.sessionToken),
+        payload,
+      });
+      expect(response.statusCode).toBe(201);
+      expect(response.json().dueAt).toBeNull();
+    }
+    await app.close();
+  });
+});

@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { extractBearerToken } from "../identity/http.js";
 import { validateSession } from "../identity/service.js";
+import { findConnectedSourcesByIdentity } from "../comms/store.js";
 import {
   classifyMessagesForIdentity,
   createPriorityRule,
@@ -10,6 +11,10 @@ import {
   isPriorityLevel,
   overrideMessagePriority,
 } from "./importance-service.js";
+
+/** Bounded so a rule row can't be used to store arbitrary bulk text. */
+const MAX_MATCH_VALUE_LENGTH = 320; // RFC 5321's maximum email address length
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 async function authenticatedIdentity(request: FastifyRequest) {
   const token = extractBearerToken(request.headers.authorization);
@@ -74,10 +79,30 @@ export function registerImportanceRoutes(app: FastifyInstance): void {
         return reply.code(400).send({ error: "level must be one of: high, normal, low." });
       }
 
+      // Validate the target. An unvalidated rule doesn't leak anything,
+      // but it creates a dead rule that silently never matches — the user
+      // believes they've tuned something and nothing changes, which is
+      // exactly the un-negotiated behaviour this feature is meant to avoid.
+      const trimmed = matchValue.trim();
+      if (trimmed.length > MAX_MATCH_VALUE_LENGTH) {
+        return reply.code(400).send({ error: `matchValue must be ${MAX_MATCH_VALUE_LENGTH} characters or fewer.` });
+      }
+      if (matchType === "contact" && !EMAIL_SHAPE.test(trimmed)) {
+        return reply.code(400).send({ error: "A contact rule needs an email address." });
+      }
+      if (matchType === "source") {
+        const owned = await findConnectedSourcesByIdentity(identity.identityId);
+        // Scoped to this identity, so a foreign source id reads as unknown
+        // rather than confirming that it exists.
+        if (!owned.some((source) => source.id === trimmed)) {
+          return reply.code(404).send({ error: "Connected source not found." });
+        }
+      }
+
       const rule = await createPriorityRule({
         identityId: identity.identityId,
         matchType,
-        matchValue: matchValue.trim(),
+        matchValue: trimmed,
         level,
       });
       return reply.code(201).send(rule);

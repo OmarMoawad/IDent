@@ -9,6 +9,13 @@ import { useAuth } from "../../lib/auth-context";
 import styles from "./inbox.module.css";
 import type { InboxMessage, InboxSource } from "./types";
 
+type Priority = {
+  messageId: string;
+  level: "high" | "normal" | "low";
+  reason: string;
+  assignedBy: "assistant" | "user" | "rule";
+};
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
@@ -38,6 +45,7 @@ export function InboxClient() {
   const [workingSource, setWorkingSource] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [priorities, setPriorities] = useState<Record<string, Priority>>({});
 
   const loadMessages = useCallback(async (nextQuery = query) => {
     if (!auth) return;
@@ -53,10 +61,15 @@ export function InboxClient() {
       return;
     }
     setLoading(true);
-    Promise.all([apiGet<InboxSource[]>("/identity/connections", auth.sessionToken), apiGet<InboxMessage[]>("/identity/messages", auth.sessionToken)])
-      .then(([nextSources, nextMessages]) => {
+    Promise.all([
+      apiGet<InboxSource[]>("/identity/connections", auth.sessionToken),
+      apiGet<InboxMessage[]>("/identity/messages", auth.sessionToken),
+      apiGet<Priority[]>("/identity/priorities", auth.sessionToken),
+    ])
+      .then(([nextSources, nextMessages, nextPriorities]) => {
         setSources(nextSources);
         setMessages(nextMessages);
+        setPriorities(Object.fromEntries(nextPriorities.map((p) => [p.messageId, p])));
       })
       .catch((reason) => setError(errorMessage(reason)))
       .finally(() => setLoading(false));
@@ -121,6 +134,53 @@ export function InboxClient() {
     }
   }
 
+  async function reloadPriorities() {
+    if (!auth) return;
+    const next = await apiGet<Priority[]>("/identity/priorities", auth.sessionToken);
+    setPriorities(Object.fromEntries(next.map((p) => [p.messageId, p])));
+  }
+
+  async function classify() {
+    if (!auth) return;
+    setError(null);
+    try {
+      const result = await apiPost<{ classified: number }>("/identity/priorities/classify", {}, auth.sessionToken);
+      await reloadPriorities();
+      setStatus(`Reviewed ${result.classified} messages. Nothing was hidden — priorities only re-order what you see.`);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  }
+
+  /** The per-message half of the override the roadmap requires. */
+  async function setPriority(messageId: string, level: Priority["level"]) {
+    if (!auth) return;
+    setError(null);
+    try {
+      await apiPost(`/identity/priorities/${messageId}`, { level }, auth.sessionToken);
+      await reloadPriorities();
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  }
+
+  /** The rule half — "stop deprioritizing this person", not just this mail. */
+  async function alwaysPrioritize(message: InboxMessage) {
+    if (!auth) return;
+    setError(null);
+    try {
+      const { from } = JSON.parse(message.participants ?? '{"from":[]}') as { from?: Array<{ address: string }> };
+      const address = from?.[0]?.address;
+      if (!address) return;
+      await apiPost("/identity/priority-rules", { matchType: "contact", matchValue: address, level: "high" }, auth.sessionToken);
+      await apiPost("/identity/priorities/classify", {}, auth.sessionToken);
+      await reloadPriorities();
+      setStatus(`Mail from ${address} will be marked high from now on.`);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  }
+
   async function openMessage(message: InboxMessage) {
     if (!auth) return;
     setError(null);
@@ -140,7 +200,7 @@ export function InboxClient() {
     <main className={styles.shell}>
       <header className={styles.header}>
         <div><span className={styles.eyebrow}>IDent Communications Hub</span><h1>Inbox</h1></div>
-        <nav aria-label="Primary"><Link href="/inbox">Inbox</Link><Link href="/contacts">Contacts</Link><Link href="/account">Account</Link></nav>
+        <nav aria-label="Primary"><Link href="/inbox">Inbox</Link><Link href="/contacts">Contacts</Link><Link href="/calendar">Calendar</Link><Link href="/assistant">Assistant</Link><Link href="/account">Account</Link></nav>
       </header>
 
       {error && <p role="alert" className={styles.error}>{error}</p>}
@@ -165,11 +225,39 @@ export function InboxClient() {
                 <span className={styles.messageTop}><strong>{message.subject || "(No subject)"}</strong>{!message.isRead && <span className={styles.unread}>Unread</span>}</span>
                 <span>{participantSummary(message.participants)}</span><span>{message.snippet || "No preview available"}</span>
                 <span className={styles.messageMeta}>{message.source?.providerAccountEmail || message.source?.provider || "Unknown source"} · <time dateTime={message.occurredAt}>{new Date(message.occurredAt).toLocaleString()}</time></span>
+                {priorities[message.id] && (
+                  // Shown inline, never used to hide the row: the reason is
+                  // the whole point of a negotiated filter.
+                  <span className={styles.messageMeta}>
+                    Priority: {priorities[message.id].level} — {priorities[message.id].reason}
+                  </span>
+                )}
               </button>
             ))}
           </section>
           <article className={styles.reader} aria-label="Message reader">
-            {selected ? <><h2>{selected.subject || "(No subject)"}</h2><p>{participantSummary(selected.participants)}</p><pre>{selected.body || selected.snippet || "No message body available."}</pre></> : <p>Select a message to read it.</p>}
+            {selected ? (
+              <>
+                <h2>{selected.subject || "(No subject)"}</h2>
+                <p>{participantSummary(selected.participants)}</p>
+                {priorities[selected.id] && (
+                  <p className={styles.messageMeta}>
+                    Priority: <strong>{priorities[selected.id].level}</strong> ({priorities[selected.id].assignedBy}) —{" "}
+                    {priorities[selected.id].reason}
+                  </p>
+                )}
+                <p>
+                  {/* Both overrides the roadmap requires: this one call, or
+                      the rule behind it. */}
+                  <button onClick={() => setPriority(selected.id, "high")}>Mark high</button>{" "}
+                  <button onClick={() => setPriority(selected.id, "low")}>Mark low</button>{" "}
+                  <button onClick={() => alwaysPrioritize(selected)}>Always prioritize this sender</button>
+                </p>
+                <pre>{selected.body || selected.snippet || "No message body available."}</pre>
+              </>
+            ) : (
+              <p>Select a message to read it.</p>
+            )}
           </article>
         </div>
       )}
