@@ -44,6 +44,8 @@ describe("resolveAssistantProvider", () => {
   it("uses a local model when only a base URL is present", () => {
     const provider = resolveAssistantProvider(env({ ASSISTANT_BASE_URL: DEFAULT_LOCAL_BASE_URL }));
     expect(provider).toMatchObject({ id: "openai_compatible", model: DEFAULT_LOCAL_MODEL, leavesMachine: false });
+    // Measured, not assumed — see the constant's note.
+    expect(DEFAULT_LOCAL_MODEL).toBe("llama3.2:3b");
     expect(provider?.destination).toContain("this machine");
   });
 

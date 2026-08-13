@@ -106,7 +106,7 @@ content).
 Run it fully locally — nothing leaves the machine:
 
 ```bash
-ollama pull llama3.1:8b
+ollama pull llama3.2:3b
 ASSISTANT_PROVIDER=local npm run dev:api
 ```
 

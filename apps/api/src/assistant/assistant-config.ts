@@ -40,8 +40,20 @@ export type AssistantProvider = {
 
 /** Default for the Anthropic path. See the note below on its status. */
 export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
-/** A small instruction-following model is the right size for grounded Q&A over ~12 retrieved items. */
-export const DEFAULT_LOCAL_MODEL = "llama3.1:8b";
+/**
+ * A small instruction-following model is the right size for grounded Q&A
+ * over ~12 retrieved items, and the default is set from measurement rather
+ * than instinct.
+ *
+ * On an M1 with 5.3 GiB of usable VRAM, `llama3.1:8b` (4.92 GB) occupies
+ * 93% of it and spends nearly all of a request loading weights: 39s for a
+ * three-token reply, and the live suite timed out. `llama3.2:3b` (2.02 GB)
+ * answered the same request in 4.1s — roughly 10x — and passes all three
+ * live tests including the grounding check.
+ *
+ * Bigger is available via ASSISTANT_MODEL on hardware that can hold it.
+ */
+export const DEFAULT_LOCAL_MODEL = "llama3.2:3b";
 export const DEFAULT_LOCAL_BASE_URL = "http://localhost:11434/v1";
 
 /**
