@@ -17,8 +17,12 @@
 .search input { flex: 1 1 15rem; border: 1px solid #8f9b94; border-radius: 999px; padding: .7rem 1rem; }
 .layout { display: grid; gap: 1rem; }
 .cards { display: grid; gap: .75rem; align-content: start; min-width: 0; }
-.card { display: grid; gap: .3rem; width: 100%; border: 1px solid #ccd4cd; border-radius: 14px; padding: 1rem; background: #fff; color: #17211d; text-align: left; }
-.card:hover, .card[aria-pressed="true"] { background: #eaf2ed; border-color: #96b3a4; }
+/* Prefixed with .shell to outrank `.shell button` above (class+element,
+   0,1,1) — see the matching comment in inbox.module.css. Without it a
+   contact card renders as a dark green pill and its address/meta text
+   drops to roughly 1.5:1 contrast. */
+.shell .card { display: grid; gap: .3rem; width: 100%; border: 1px solid #ccd4cd; border-radius: 14px; padding: 1rem; background: #fff; color: #17211d; text-align: left; }
+.shell .card:hover, .shell .card[aria-pressed="true"] { background: #eaf2ed; border-color: #96b3a4; }
 .cardName { font-family: Georgia, serif; font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
 .cardAddress { color: #506057; font-size: .9rem; overflow-wrap: anywhere; }
 .cardMeta { color: #66736c; font-size: .8rem; }

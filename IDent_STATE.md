@@ -36,11 +36,45 @@ call it — with a regression test using the exact shape the sync writes.
 This is a concrete argument for the still-pending real-browser
 click-through, not an argument that it is now unnecessary.
 
-161 tests (147 API + 14 web), workspace typecheck, and production build all
-pass. One pre-existing unrelated flake: `identity/password.test.ts` can
-exceed its 5s timeout under parallel load (argon2 is CPU-bound); it passes
-in isolation and predates this session. Real-browser click-through of
-`/contacts` and `/inbox` remains pending and is not claimed.
+**Real-browser click-through done, 2026-08-13** — and it earned its keep by
+finding two more bugs neither the test suite nor typecheck could see:
+
+1. **The API would not boot on a clean checkout.** `.env.example` ships
+   `COMMS_TOKEN_ENCRYPTION_KEY=` blank, so DEVELOPMENT.md's own documented
+   `cp .env.example .env` made dotenv define it as `""`. `??` treats an
+   empty string as configured, it decoded to zero bytes, and
+   `token-encryption.ts` threw at import time. Now `?.trim() ||`, so blank
+   means unset; 4 regression tests cover unset/blank/whitespace/real-key.
+   Exactly the same *class* of bug as item 2.5's dotenv-path fix — env
+   silently wrong, invisible until something actually runs.
+2. **Every message row and contact card rendered as an unreadable dark
+   green pill.** `.shell button` (class+element, 0,1,1) outranks a bare
+   `.message`/`.card` (0,1,0), so the pill style won over the intended
+   white card — putting `#66736c` meta text on `#315c48` at roughly 1.5:1
+   contrast. Both stylesheets now scope those rules with `.shell`.
+
+Verified working in the browser: registration → `/account`; `/inbox`
+listing newest-first with correct **sender names** (the participants fix
+confirmed live — every row would have read "Unknown sender" before it),
+unread badges, search filtering, and message bodies rendering a literal
+`<script>` tag as inert text; `/contacts` empty state, rebuild ("Rebuilt
+from 4 messages: 3 contacts"), cross-case + multi-name unification of one
+person into a single card with the correct first-seen date, own-address
+exclusion, singular/plural counts, detail panel listing only that person's
+messages, and search. All API calls returned 200/204.
+
+**Not verified, deliberately:** the Gmail OAuth leg was not re-run — that
+needs Omar's real Google credentials, and it was already browser-verified
+in item 2.5. The connected source and messages were seeded directly into
+the database using the exact `{from,to}` participants envelope
+`gmail-sync-service.ts` writes, so everything downstream of the connector
+is genuinely exercised; the connector itself is not re-claimed here.
+
+165 tests (151 API + 14 web), workspace typecheck, and production build all
+pass. Two pre-existing unrelated flakes under parallel load, both passing
+in isolation and both predating this session: `identity/password.test.ts`
+and `identity/routes.test.ts`'s recovery-regeneration case (argon2 is
+CPU-bound and can exceed the 5s timeout).
 
 Previously, 2026-08-13 — **Session 16 done**: the protected unified inbox,
 the fourth slice of **Phase 1: Communications Hub**. The new `/inbox` page
