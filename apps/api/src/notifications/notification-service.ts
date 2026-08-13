@@ -1,8 +1,8 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { notificationEndpoints } from "../db/schema.js";
-import { findConnectedSourcesByIdentity, insertConnectedSource, upsertMessage } from "../comms/store.js";
+import { getOrCreateConnectedSource, upsertMessage } from "../comms/store.js";
 
 /**
  * Phase 1 session 20 — notification aggregation.
@@ -31,43 +31,85 @@ export class InvalidNotificationError extends Error {
 }
 
 /**
- * Stable per identity: an endpoint the user has already configured in a
- * third-party service must not change underneath them, so this upserts
- * rather than regenerating. 144 bits of entropy, base64url — the token is
- * the only credential on the ingest path.
+ * The ingest token is a bearer credential, so only its **hash** is stored —
+ * the same rule the `sessions` table applies to its cookie. A database dump
+ * therefore yields nothing usable, and the plaintext exists only in the one
+ * response that mints it.
+ *
+ * The consequence, deliberately accepted: a lost token cannot be shown
+ * again, only replaced. That is how an API key should behave.
  */
-export async function getOrCreateNotificationToken(identityId: string): Promise<string> {
-  const existing = await db
-    .select({ token: notificationEndpoints.token })
-    .from(notificationEndpoints)
-    .where(eq(notificationEndpoints.identityId, identityId))
-    .limit(1);
-  if (existing[0]) return existing[0].token;
+export function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
-  const [row] = await db
+export const NOTIFICATION_TOKEN_HEADER = "x-ident-notification-token";
+
+/**
+ * Mints a new token, replacing any existing one. Rotation *is* revocation:
+ * the previous hash is overwritten, so a leaked token stops working the
+ * moment this is called.
+ *
+ * 144 bits of entropy — the token is the entire credential on the ingest
+ * path, and brute-force must be hopeless rather than merely expensive.
+ */
+export async function rotateNotificationToken(identityId: string): Promise<string> {
+  const token = randomBytes(18).toString("base64url");
+  await db
     .insert(notificationEndpoints)
-    .values({ identityId, token: randomBytes(18).toString("base64url") })
-    .onConflictDoNothing()
-    .returning({ token: notificationEndpoints.token });
+    .values({ identityId, tokenHash: hashToken(token) })
+    .onConflictDoUpdate({
+      target: notificationEndpoints.identityId,
+      set: { tokenHash: hashToken(token), lastError: null, lastErrorAt: null },
+    });
+  return token;
+}
 
-  // Lost a race with a concurrent create — read the winner rather than
-  // handing back a token that was never stored.
-  if (row) return row.token;
-  const winner = await db
-    .select({ token: notificationEndpoints.token })
+export type EndpointStatus = { configured: boolean; createdAt: Date | null; lastError: string | null; lastErrorAt: Date | null };
+
+/**
+ * Status only — never the token. The plaintext is unrecoverable by design;
+ * `lastError` is how the owner debugs a misconfigured sender given that the
+ * ingest endpoint deliberately tells the sender nothing (see the routes).
+ */
+export async function getNotificationEndpointStatus(identityId: string): Promise<EndpointStatus> {
+  const rows = await db
+    .select({
+      createdAt: notificationEndpoints.createdAt,
+      lastError: notificationEndpoints.lastError,
+      lastErrorAt: notificationEndpoints.lastErrorAt,
+    })
     .from(notificationEndpoints)
     .where(eq(notificationEndpoints.identityId, identityId))
     .limit(1);
-  return winner[0].token;
+  const row = rows[0];
+  return {
+    configured: Boolean(row),
+    createdAt: row?.createdAt ?? null,
+    lastError: row?.lastError ?? null,
+    lastErrorAt: row?.lastErrorAt ?? null,
+  };
 }
 
 async function resolveIdentity(token: string): Promise<string | null> {
   const rows = await db
     .select({ identityId: notificationEndpoints.identityId })
     .from(notificationEndpoints)
-    .where(eq(notificationEndpoints.token, token))
+    // Compared by hash, so the plaintext is never in a query either.
+    .where(eq(notificationEndpoints.tokenHash, hashToken(token)))
     .limit(1);
   return rows[0]?.identityId ?? null;
+}
+
+/**
+ * Recorded so the owner can see why a sender was rejected, given that the
+ * sender itself is told nothing.
+ */
+async function recordDeliveryError(identityId: string, message: string): Promise<void> {
+  await db
+    .update(notificationEndpoints)
+    .set({ lastError: message.slice(0, 500), lastErrorAt: new Date() })
+    .where(eq(notificationEndpoints.identityId, identityId));
 }
 
 /**
@@ -78,16 +120,17 @@ async function resolveIdentity(token: string): Promise<string | null> {
  * receives a notification.
  */
 async function notificationSourceId(identityId: string): Promise<string> {
-  const sources = await findConnectedSourcesByIdentity(identityId);
-  const existing = sources.find((source) => source.provider === NOTIFICATION_PROVIDER);
-  if (existing) return existing.id;
-
-  const created = await insertConnectedSource({
+  // Atomic, and with a **non-null** providerAccountId so the existing
+  // (identityId, provider, providerAccountId) uniqueness actually applies:
+  // Postgres treats NULLs as distinct, so the previous find-then-insert let
+  // two concurrent first deliveries each create a pseudo-source.
+  const source = await getOrCreateConnectedSource({
     identityId,
     provider: NOTIFICATION_PROVIDER,
+    providerAccountId: NOTIFICATION_PROVIDER,
     status: "connected",
   });
-  return created.id;
+  return source.id;
 }
 
 /**
@@ -121,7 +164,11 @@ export type NotificationInput = {
   occurredAt?: unknown;
 };
 
-export type IngestResult = { status: "accepted"; messageId: string } | { status: "unknown-endpoint" };
+/**
+ * Every outcome is `accepted` from the caller's point of view. See
+ * ingestNotification for why.
+ */
+export type IngestResult = { status: "accepted"; messageId?: string };
 
 function requireString(value: unknown, field: string, max: number): string {
   if (typeof value !== "string" || !value.trim()) {
@@ -132,46 +179,68 @@ function requireString(value: unknown, field: string, max: number): string {
   return trimmed;
 }
 
+/**
+ * Ingest one notification. **Never signals to the caller whether the token
+ * was real.**
+ *
+ * An earlier version returned 202 for an unknown token and 201/400 for a
+ * known one, which was described as non-diagnostic and wasn't: a malformed
+ * payload distinguished a live token from a dead one in a single request.
+ * A 144-bit token makes discovery by enumeration hopeless either way, but
+ * the distinction still let someone holding a *leaked* token confirm it was
+ * live, so the claim was wrong and the behaviour is now what the claim
+ * said. Rejections are recorded against the endpoint instead, where the
+ * owner — and only the owner — can read them.
+ */
 export async function ingestNotification(token: string, input: NotificationInput): Promise<IngestResult> {
   const identityId = await resolveIdentity(token);
-  // Validation happens only after the token resolves, so a caller with a
-  // bad token learns nothing about which payloads would have been valid.
-  if (!identityId) return { status: "unknown-endpoint" };
+  if (!identityId) return { status: "accepted" };
 
-  const app = requireString(input.app, "app", MAX_APP_LENGTH);
-  const title = requireString(input.title, "title", MAX_TITLE_LENGTH);
-  const body = typeof input.body === "string" ? input.body.trim().slice(0, MAX_BODY_LENGTH) : null;
-  const actionUrl = safeActionUrl(input.actionUrl);
+  try {
+    const app = requireString(input.app, "app", MAX_APP_LENGTH);
+    const title = requireString(input.title, "title", MAX_TITLE_LENGTH);
+    const body = typeof input.body === "string" ? input.body.trim().slice(0, MAX_BODY_LENGTH) : null;
+    const actionUrl = safeActionUrl(input.actionUrl);
 
-  const occurredAt = typeof input.occurredAt === "string" ? new Date(input.occurredAt) : new Date();
-  if (Number.isNaN(occurredAt.getTime())) {
-    throw new InvalidNotificationError("occurredAt must be a valid date.");
+    const occurredAt = typeof input.occurredAt === "string" ? new Date(input.occurredAt) : new Date();
+    if (Number.isNaN(occurredAt.getTime())) {
+      throw new InvalidNotificationError("occurredAt must be a valid date.");
+    }
+
+    // A sender that supplies its own id gets idempotency for free (the
+    // upsert is on (sourceId, externalId)); one that doesn't gets a fresh
+    // row per delivery, which is the honest behaviour — we cannot
+    // deduplicate what we cannot identify.
+    const externalId =
+      typeof input.externalId === "string" && input.externalId.trim()
+        ? `${app}:${input.externalId.trim()}`.slice(0, 300)
+        : `${app}:${randomBytes(12).toString("base64url")}`;
+
+    const message = await upsertMessage({
+      identityId,
+      sourceId: await notificationSourceId(identityId),
+      externalId,
+      subject: title,
+      snippet: body?.slice(0, 200) ?? null,
+      body,
+      // Reuses the shared participants envelope so the sender renders the
+      // same way a message sender does, and the assistant's existing
+      // retrieval reads it without a special case.
+      participants: JSON.stringify({
+        from: [{ name: app, address: `${app.toLowerCase()}@notifications.ident` }],
+        to: [],
+      }),
+      occurredAt,
+      kind: "notification",
+      actionUrl,
+    });
+
+    return { status: "accepted", messageId: message.id };
+  } catch (error) {
+    if (error instanceof InvalidNotificationError) {
+      await recordDeliveryError(identityId, error.message);
+      return { status: "accepted" };
+    }
+    throw error;
   }
-
-  // A sender that supplies its own id gets idempotency for free (the
-  // upsert is on (sourceId, externalId)); one that doesn't gets a fresh
-  // row per delivery, which is the honest behaviour — we cannot
-  // deduplicate what we cannot identify.
-  const externalId =
-    typeof input.externalId === "string" && input.externalId.trim()
-      ? `${app}:${input.externalId.trim()}`.slice(0, 300)
-      : `${app}:${randomBytes(12).toString("base64url")}`;
-
-  const message = await upsertMessage({
-    identityId,
-    sourceId: await notificationSourceId(identityId),
-    externalId,
-    subject: title,
-    snippet: body?.slice(0, 200) ?? null,
-    body,
-    // Reuses the shared participants envelope so the sender renders the
-    // same way a message sender does, and the assistant's existing
-    // retrieval reads it without a special case.
-    participants: JSON.stringify({ from: [{ name: app, address: `${app.toLowerCase()}@notifications.ident` }], to: [] }),
-    occurredAt,
-    kind: "notification",
-    actionUrl,
-  });
-
-  return { status: "accepted", messageId: message.id };
 }

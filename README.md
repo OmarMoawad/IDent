@@ -78,10 +78,19 @@ mail, discriminated by `kind`.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /identity/notifications/endpoint` | The caller's own opaque ingest path |
-| `POST /notifications/ingest/:token` | Where a service posts; the token is the credential |
+| `GET /identity/notifications/endpoint` | Status only — never the token |
+| `POST /identity/notifications/endpoint` | Mint or rotate; returns the plaintext **once** |
+| `POST /notifications/ingest` | Where a service posts, token in the `x-ident-notification-token` header |
+| `POST /notifications/ingest/:token` | URL fallback for senders that cannot set headers; the path is redacted in logs |
 | `GET /identity/messages?kind=notification` | Segment the unified list |
 
+Only the sha256 hash of the token is stored, so a database dump yields no
+usable credential and a lost token can only be replaced, not recovered.
 `actionUrl` is validated to http/https at ingest — a `javascript:` URL
-rendered as a link is stored XSS. An unknown token returns 202 rather than
-404 so the endpoint can't be probed for valid tokens.
+rendered as a link is stored XSS.
+
+The ingest endpoint answers **202 to everything** — unknown token, valid
+delivery, malformed payload — so it cannot be used to test whether a token
+is live. Rejections are recorded against the endpoint for the owner to
+read, which is how a misconfigured sender stays debuggable without
+telling the sender anything.

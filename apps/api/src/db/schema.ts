@@ -598,7 +598,21 @@ export const notificationEndpoints = pgTable(
       .notNull()
       .references(() => identities.id, { onDelete: "cascade" })
       .unique(),
-    token: text("token").notNull().unique(),
+    /**
+     * Only the sha256 hash of the token is stored — the same rule the
+     * `sessions` table already applies to its bearer cookie. A database
+     * dump therefore yields no usable ingest credential, and the plaintext
+     * exists only in the single response that mints it.
+     */
+    tokenHash: text("token_hash").notNull().unique(),
+    /**
+     * Why the last delivery was rejected, if it was. The ingest endpoint
+     * answers 202 to everything (see notification-routes.ts) so that it
+     * cannot be used to test whether a token is real; this column is how
+     * the *owner* still gets to debug a misconfigured sender.
+     */
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
 );

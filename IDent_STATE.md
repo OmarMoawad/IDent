@@ -5,8 +5,15 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-13 — **Session 20: notifications. Phase 1's scope is
-now actually complete, not just its session cadence.**
+Last updated: 2026-08-13 — **Session 20: notification ingestion and inbox
+aggregation.**
+
+Scoped precisely, because an earlier draft of this entry overclaimed:
+Phase 1's unified notification *ingestion and aggregation* are
+implemented. ROADMAP.md says notifications are "pulled from connected
+sources", and what exists is a **generic inbound webhook** — no
+notification-producing provider is integrated, and nothing has been
+validated end to end against a real one. That remains open.
 
 The eight-session cadence read 8/8 with every numbered item struck
 through, but ROADMAP.md's Phase 1 opens with *"Unified inbox: messages
@@ -24,16 +31,40 @@ underneath the user), an unauthenticated-by-session `POST
 notifications stored in the **same** `messages` table discriminated by
 `kind`. One table rather than two because Phase 1's promise is a single
 unified inbox — two would mean merging on every read and teaching every
-downstream feature (search, priorities, the assistant) two shapes. They
-are searchable, classifiable, and assistant-retrievable for free as a
-result.
+downstream feature (search, priorities, the assistant) two shapes. They therefore **reuse** the existing search, priority, and
+assistant-retrieval paths rather than needing new ones. Shared storage
+reduces the work; it is not by itself proof that each of those features
+handles notification semantics correctly, and that is untested.
 
-Security decisions worth keeping: an unknown token returns 202, not 404,
-so the endpoint can't be used to probe which tokens exist; `actionUrl` is
-validated to http/https at ingest, because a `javascript:` URL rendered
-as a link is stored XSS and this value arrives from outside; and payload
-validation runs only *after* the token resolves, so a bad caller learns
-nothing about what a valid payload looks like.
+**Review fixes, same day.** A review found two real security defects in
+the first cut of this, both now fixed:
+
+- **The ingest credential was being written to the request log.** The
+  token travelled as a URL path segment and Fastify logs `req.url`, so it
+  landed in application logs and would have flowed onward to any proxy or
+  tracing system. The token now travels in a header
+  (`x-ident-notification-token`); the URL form is kept for senders that
+  cannot set headers, and a log serializer redacts that path before it
+  reaches the logger. Only the **hash** is stored now, so a database dump
+  yields nothing usable, and minting returns the plaintext exactly once —
+  rotation doubles as revocation. There is a test that asserts against
+  real captured log output rather than reading the serializer.
+- **The "unknown token returns 202" claim was wrong.** Unknown returned
+  202 but a known token returned 201 or 400, so a malformed payload
+  distinguished a live token from a dead one in a single request. The
+  claim described a property the code did not have. Every outcome is now
+  202 with an identical body; rejections are recorded against the endpoint
+  where the *owner* — and only the owner — can read them, so a
+  misconfigured sender is still debuggable.
+
+Also fixed: concurrent first deliveries could create duplicate
+pseudo-sources, because the uniqueness constraint includes a nullable
+`providerAccountId` and Postgres treats NULLs as distinct. The
+pseudo-source now has a stable non-null account id and is created
+atomically.
+
+`actionUrl` remains validated to http/https at ingest — a `javascript:`
+URL rendered as a link is stored XSS and this value arrives from outside.
 
 **Also fixed two UI gaps that shipped silently in session 19.** Two
 scripted edits to `inbox-client.tsx` failed to match their anchor and
@@ -43,13 +74,22 @@ unreachable from the app. Every priority test still passed because they
 all exercised behaviour behind the missing entry point rather than the
 entry point itself. There is now a test that clicks the button.
 
-239 tests (208 API + 31 web), workspace typecheck, and production build
+245 tests (213 API + 32 web), workspace typecheck, and production build
 all pass.
 
 **Phase 2 is now re-baselined** (8 sessions, at the end of this file).
 Session 1 — extracting the Gmail-shaped OAuth lifecycle into a provider
 registry — needs no accounts and is what makes Slack, Notion, and Drive
 cheap rather than three copies of the same flow.
+
+**The assistant's model identifier is unverified, not verified.** An
+earlier note here called `claude-opus-5` "verified" on the strength of it
+appearing in the installed SDK's type union. A review correctly pointed
+out that an SDK union proves the SDK accepts a string, not that the API
+serves that model — and no live request has ever been made. The word is
+withdrawn. The default stands as a choice pending verification rather
+than a settled fact; `ANTHROPIC_MODEL` overrides it, and a single real
+request settles it.
 
 **Still not verified:** no real Anthropic key and no real Google OAuth
 client exist, so neither integration is proven against a live provider.

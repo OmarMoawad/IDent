@@ -62,6 +62,42 @@ export async function findConnectedSourcesByIdentity(identityId: string): Promis
  * creating a redundant duplicate — see gmail-service.ts's
  * completeGmailConnection.
  */
+/**
+ * Atomic get-or-create, keyed on the same
+ * (identityId, provider, providerAccountId) uniqueness the schema already
+ * declares. `insertConnectedSource` plus a prior lookup is a read-then-write
+ * race: two concurrent first-time deliveries both see nothing and both
+ * insert. That race is not theoretical for the notification pseudo-source,
+ * where the two requests arrive from the same third-party service at once.
+ *
+ * Requires a **non-null** providerAccountId — Postgres treats NULLs as
+ * distinct in a UNIQUE constraint, so a null here would let duplicates
+ * through even with the conflict target set.
+ */
+export async function getOrCreateConnectedSource(input: {
+  identityId: string;
+  provider: string;
+  providerAccountId: string;
+  status?: string;
+}): Promise<ConnectedSource> {
+  const [row] = await db
+    .insert(connectedSources)
+    .values({
+      identityId: input.identityId,
+      provider: input.provider,
+      providerAccountId: input.providerAccountId,
+      status: input.status ?? "connected",
+    })
+    .onConflictDoUpdate({
+      target: [connectedSources.identityId, connectedSources.provider, connectedSources.providerAccountId],
+      // A no-op update rather than DoNothing: DoNothing returns no row on
+      // conflict, which would leave the loser of the race with nothing.
+      set: { updatedAt: new Date() },
+    })
+    .returning(connectedSourceColumns);
+  return row;
+}
+
 export async function findConnectedSourceByProviderAccount(
   identityId: string,
   provider: string,

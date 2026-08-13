@@ -47,7 +47,8 @@ export function InboxClient() {
   const [error, setError] = useState<string | null>(null);
   const [priorities, setPriorities] = useState<Record<string, Priority>>({});
   const [kind, setKind] = useState<"" | "message" | "notification">("");
-  const [endpoint, setEndpoint] = useState<string | null>(null);
+  const [endpoint, setEndpoint] = useState<{ token: string; header: string; path: string; notice: string } | null>(null);
+  const [endpointStatus, setEndpointStatus] = useState<{ configured: boolean; lastError: string | null } | null>(null);
 
   const loadMessages = useCallback(async (nextQuery = query, nextKind = kind) => {
     if (!auth) return;
@@ -71,11 +72,23 @@ export function InboxClient() {
     }
   }
 
-  async function revealEndpoint() {
+  /**
+   * Minting returns the plaintext exactly once — only its hash is stored —
+   * so the UI has to say that outright rather than implying it can be
+   * looked up again later.
+   */
+  async function mintEndpoint() {
     if (!auth) return;
+    setError(null);
     try {
-      const result = await apiGet<{ path: string }>("/identity/notifications/endpoint", auth.sessionToken);
-      setEndpoint(result.path);
+      setEndpoint(
+        await apiPost<{ token: string; header: string; path: string; notice: string }>(
+          "/identity/notifications/endpoint",
+          {},
+          auth.sessionToken,
+        ),
+      );
+      setEndpointStatus({ configured: true, lastError: null });
     } catch (reason) {
       setError(errorMessage(reason));
     }
@@ -92,11 +105,13 @@ export function InboxClient() {
       apiGet<InboxSource[]>("/identity/connections", auth.sessionToken),
       apiGet<InboxMessage[]>("/identity/messages", auth.sessionToken),
       apiGet<Priority[]>("/identity/priorities", auth.sessionToken),
+      apiGet<{ configured: boolean; lastError: string | null }>("/identity/notifications/endpoint", auth.sessionToken),
     ])
-      .then(([nextSources, nextMessages, nextPriorities]) => {
+      .then(([nextSources, nextMessages, nextPriorities, nextEndpoint]) => {
         setSources(nextSources);
         setMessages(nextMessages);
         setPriorities(Object.fromEntries(nextPriorities.map((p) => [p.messageId, p])));
+        setEndpointStatus(nextEndpoint);
       })
       .catch((reason) => setError(errorMessage(reason)))
       .finally(() => setLoading(false));
@@ -236,14 +251,28 @@ export function InboxClient() {
       <section className={styles.sources} aria-labelledby="notifications-heading">
         <div>
           <h2 id="notifications-heading">Notifications</h2>
-          <p>
-            Notifications from connected services arrive in this same inbox.
-            {endpoint ? ` Send them to ${endpoint}` : ""}
-          </p>
+          <p>Notifications from connected services arrive in this same inbox.</p>
+          {endpoint && (
+            <>
+              <p>
+                Send them to <code>{endpoint.path}</code> with header{" "}
+                <code>
+                  {endpoint.header}: {endpoint.token}
+                </code>
+              </p>
+              {/* Stated outright, because it is true and irreversible. */}
+              <p role="status">{endpoint.notice}</p>
+            </>
+          )}
+          {endpointStatus?.lastError && (
+            // The ingest endpoint tells senders nothing, so this is the only
+            // place a misconfigured sender becomes visible.
+            <p role="alert">Last delivery rejected: {endpointStatus.lastError}</p>
+          )}
         </div>
-        {/* The token is a credential, so it is fetched on request rather
-            than rendered on every inbox load. */}
-        <button onClick={revealEndpoint}>{endpoint ? "Shown" : "Show ingest endpoint"}</button>
+        <button onClick={mintEndpoint}>
+          {endpointStatus?.configured ? "Regenerate ingest token" : "Create ingest token"}
+        </button>
       </section>
 
       <section className={styles.sources} aria-label="Filter by kind">

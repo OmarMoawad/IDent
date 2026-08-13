@@ -2,9 +2,10 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { extractBearerToken } from "../identity/http.js";
 import { validateSession } from "../identity/service.js";
 import {
-  getOrCreateNotificationToken,
+  getNotificationEndpointStatus,
   ingestNotification,
-  InvalidNotificationError,
+  NOTIFICATION_TOKEN_HEADER,
+  rotateNotificationToken,
 } from "./notification-service.js";
 
 async function authenticatedIdentity(request: FastifyRequest) {
@@ -14,40 +15,62 @@ async function authenticatedIdentity(request: FastifyRequest) {
 
 export function registerNotificationRoutes(app: FastifyInstance): void {
   /**
-   * The user's own ingest endpoint, to paste into a third-party service's
-   * webhook configuration. Session-authenticated: the token is a
-   * credential, so only its owner may read it.
+   * Status only — deliberately never the token. Only the hash is stored, so
+   * the plaintext is unrecoverable after minting; `lastError` is how the
+   * owner debugs a sender, since the ingest endpoint tells the sender
+   * nothing.
    */
   app.get("/identity/notifications/endpoint", async (request, reply) => {
     const identity = await authenticatedIdentity(request);
     if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
-
-    const token = await getOrCreateNotificationToken(identity.identityId);
-    return { token, path: `/notifications/ingest/${token}` };
+    return getNotificationEndpointStatus(identity.identityId);
   });
 
   /**
-   * The ingest path itself. Deliberately *not* session-authenticated —
-   * the caller is a third-party service, and the opaque token in the URL
-   * is the credential, the same design as Receiptless's inbound webhook.
-   *
-   * An unknown token returns 202, not 404: a 404 would let anyone probe
-   * which tokens exist, and there is nothing useful a legitimate caller
-   * could do with the distinction anyway.
+   * Mint or rotate. Returns the plaintext **once** — this is the only
+   * response in the system that ever contains it. Rotation doubles as
+   * revocation: the old hash is overwritten.
    */
-  app.post<{ Params: { token: string }; Body: Record<string, unknown> }>(
+  app.post("/identity/notifications/endpoint", async (request, reply) => {
+    const identity = await authenticatedIdentity(request);
+    if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
+
+    const token = await rotateNotificationToken(identity.identityId);
+    return reply.code(201).send({
+      token,
+      header: NOTIFICATION_TOKEN_HEADER,
+      path: "/notifications/ingest",
+      // Said plainly because the UI cannot show it again.
+      notice: "Copy this now — it is stored only as a hash and cannot be shown again.",
+    });
+  });
+
+  /**
+   * The ingest path. The caller is a third-party service, so there is no
+   * session; the token is the credential.
+   *
+   * It travels in a **header**, not the URL, because Fastify logs
+   * `req.url` on every request — a credential in the path lands in
+   * application logs and any proxy or tracing system downstream. The
+   * `:token` URL form is still accepted for senders that cannot set
+   * headers, and app.ts redacts that path before it reaches the logger.
+   *
+   * Always answers 202, whatever happens. See ingestNotification.
+   */
+  const handler = async (request: FastifyRequest<{ Params: { token?: string }; Body: Record<string, unknown> }>) => {
+    const header = request.headers[NOTIFICATION_TOKEN_HEADER];
+    const token = (typeof header === "string" && header) || request.params.token || "";
+    await ingestNotification(token, request.body ?? {});
+    return { status: "accepted" };
+  };
+
+  app.post<{ Params: { token?: string }; Body: Record<string, unknown> }>(
+    "/notifications/ingest",
+    async (request, reply) => reply.code(202).send(await handler(request)),
+  );
+
+  app.post<{ Params: { token?: string }; Body: Record<string, unknown> }>(
     "/notifications/ingest/:token",
-    async (request, reply) => {
-      try {
-        const result = await ingestNotification(request.params.token, request.body ?? {});
-        if (result.status === "unknown-endpoint") return reply.code(202).send({ status: "accepted" });
-        return reply.code(201).send(result);
-      } catch (error) {
-        if (error instanceof InvalidNotificationError) {
-          return reply.code(400).send({ error: error.message });
-        }
-        throw error;
-      }
-    },
+    async (request, reply) => reply.code(202).send(await handler(request)),
   );
 }

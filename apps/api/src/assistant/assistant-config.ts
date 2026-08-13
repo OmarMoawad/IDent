@@ -13,16 +13,24 @@
 /**
  * The model, overridable without a code change.
  *
- * Default `claude-opus-5` — verified against the installed
- * `@anthropic-ai/sdk` (0.116.0), whose model union contains it. A review
- * queried whether this identifier is real and suggested
- * `claude-opus-4-20250514` instead; that string is *not* in the current
- * SDK's union, and the Opus 4 series is the deprecated one. Recorded here
- * so the question isn't re-litigated from stale documentation.
+ * **What is actually established, and what isn't.** `claude-opus-5` is
+ * present in the installed `@anthropic-ai/sdk` (0.116.0) model union.
+ * That is evidence the SDK accepts the string; a review correctly pointed
+ * out it is *not* evidence the live API serves that model, and no request
+ * has ever been made. An earlier version of this comment called the
+ * identifier "verified" — it wasn't, and that word is withdrawn.
  *
- * **Not smoke-tested against the live API** — no key has been used. That
- * gate is tracked in IDent_STATE.md, and this env var exists partly so it
- * can be changed without a deploy if the default ever proves wrong.
+ * The same review suggested `claude-opus-4-20250514` as the default on the
+ * strength of an Anthropic prompt-library example. That string is a dated
+ * Opus 4 snapshot; the Opus 4 series is superseded, and prompt-library
+ * pages are not maintained against model deprecations. Switching a default
+ * to an older snapshot on that evidence would trade one unverified
+ * identifier for one that is probably worse, so the default stands — but
+ * it stands as a *choice pending verification*, not a settled fact.
+ *
+ * Settle it with a real request once ANTHROPIC_API_KEY exists; until then
+ * ANTHROPIC_MODEL is the escape hatch, and IDent_STATE.md carries this as
+ * an open item.
  */
 export const ASSISTANT_MODEL = process.env.ANTHROPIC_MODEL?.trim() || "claude-opus-5";
 

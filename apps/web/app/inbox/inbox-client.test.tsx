@@ -32,7 +32,7 @@ describe("InboxClient", () => {
   });
 
   it("offers Gmail connection when no sources exist", async () => {
-    apiGet.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce({ configured: false, lastError: null });
     render(<InboxClient />);
     expect(await screen.findByText("Connect Gmail to bring messages into IDent.")).toBeInTheDocument();
     apiPost.mockImplementation(() => new Promise(() => undefined));
@@ -42,7 +42,7 @@ describe("InboxClient", () => {
 
   it("says so when contacts could not be refreshed after an otherwise good sync", async () => {
     const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce({ configured: false, lastError: null });
     render(<InboxClient />);
     await screen.findByRole("button", { name: "Sync now" });
 
@@ -61,7 +61,7 @@ describe("InboxClient", () => {
 
   it("reports a plain success when both sync and the contact refresh work", async () => {
     const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce({ configured: false, lastError: null });
     render(<InboxClient />);
     await screen.findByRole("button", { name: "Sync now" });
 
@@ -84,7 +84,7 @@ describe("InboxClient", () => {
       to: [{ address: "me@example.com" }],
     });
     const message = { id: "message-1", subject: "Project Atlas", snippet: "Latest update", body: null, participants, occurredAt: "2026-08-13T10:00:00Z", isRead: false, source };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]).mockResolvedValueOnce({ configured: false, lastError: null });
     render(<InboxClient />);
     expect(await screen.findByText("Jane Doe")).toBeInTheDocument();
     expect(screen.queryByText("Unknown sender")).not.toBeInTheDocument();
@@ -93,7 +93,7 @@ describe("InboxClient", () => {
   it("still says Unknown sender when a message genuinely has no usable participants", async () => {
     const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
     const message = { id: "message-1", subject: "Project Atlas", snippet: null, body: null, participants: "not json", occurredAt: "2026-08-13T10:00:00Z", isRead: false, source };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]).mockResolvedValueOnce({ configured: false, lastError: null });
     render(<InboxClient />);
     expect(await screen.findByText("Unknown sender")).toBeInTheDocument();
   });
@@ -101,7 +101,7 @@ describe("InboxClient", () => {
   it("renders, searches, reads plain text, and preserves the list on sync failure", async () => {
     const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
     const message = { id: "message-1", subject: "Project Atlas", snippet: "Latest update", body: null, participants: null, occurredAt: "2026-08-13T10:00:00Z", isRead: false, source };
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]).mockResolvedValueOnce({ configured: false, lastError: null });
     render(<InboxClient />);
     expect(await screen.findByText("Project Atlas")).toBeInTheDocument();
     expect(screen.getByText("Unread")).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe("importance controls (session 19)", () => {
     // rendered it, so the feature was unreachable and every other
     // priority test still passed. Assert the entry point, not just the
     // behaviour behind it.
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]);
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]).mockResolvedValueOnce({ configured: false, lastError: null });
     render(<InboxClient />);
     const review = await screen.findByRole("button", { name: "Review priorities" });
 
@@ -256,7 +256,11 @@ describe("notifications in the unified inbox (session 20)", () => {
   };
 
   function load(messages: unknown[]) {
-    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce(messages).mockResolvedValueOnce([]);
+    apiGet
+      .mockResolvedValueOnce([source])
+      .mockResolvedValueOnce(messages)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ configured: false, lastError: null });
   }
 
   it("lists mail and notifications together by default", async () => {
@@ -300,15 +304,37 @@ describe("notifications in the unified inbox (session 20)", () => {
     expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
   });
 
-  it("reveals the ingest endpoint on request rather than showing it by default", async () => {
+  it("mints a token on request and says it cannot be shown again", async () => {
     load([]);
     render(<InboxClient />);
-    const button = await screen.findByRole("button", { name: "Show ingest endpoint" });
-    // The token is a credential, so it isn't rendered until asked for.
+    const button = await screen.findByRole("button", { name: "Create ingest token" });
+    // Nothing is rendered until asked for — and there is nothing to render,
+    // since only the hash is stored.
     expect(screen.queryByText(/notifications\/ingest/)).not.toBeInTheDocument();
 
-    apiGet.mockResolvedValueOnce({ path: "/notifications/ingest/abc123" });
+    apiPost.mockResolvedValueOnce({
+      token: "tok-abc123",
+      header: "x-ident-notification-token",
+      path: "/notifications/ingest",
+      notice: "Copy this now — it is stored only as a hash and cannot be shown again.",
+    });
     fireEvent.click(button);
-    expect(await screen.findByText(/\/notifications\/ingest\/abc123/)).toBeInTheDocument();
+
+    expect(await screen.findByText(/tok-abc123/)).toBeInTheDocument();
+    // The one-time nature has to be stated, not implied.
+    expect(screen.getByText(/cannot be shown again/)).toBeInTheDocument();
+  });
+
+  it("surfaces a rejected delivery, since the sender is told nothing", async () => {
+    apiGet
+      .mockResolvedValueOnce([source])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ configured: true, lastError: "title is required." });
+    render(<InboxClient />);
+
+    expect(await screen.findByText(/Last delivery rejected: title is required\./)).toBeInTheDocument();
+    // And the button reflects that an endpoint already exists.
+    expect(screen.getByRole("button", { name: "Regenerate ingest token" })).toBeInTheDocument();
   });
 });
