@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, gt } from "drizzle-orm";
+import { and, desc, eq, gt, ilike, isNull, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { connectedSources, messages, oauthStateChallenges } from "../db/schema.js";
 
@@ -162,7 +162,20 @@ export async function upsertMessage(input: NewMessage): Promise<Message> {
  * connected_sources. Ordered newest-first, since "what came in" is the
  * natural default read order for an inbox.
  */
-export async function findMessagesByIdentity(identityId: string): Promise<Message[]> {
+export async function findMessagesByIdentity(
+  identityId: string,
+  options: { query?: string; limit?: number } = {},
+): Promise<Message[]> {
+  const query = options.query?.trim();
+  const limit = Math.max(1, Math.min(options.limit ?? 100, 100));
+  const search = query
+    ? or(
+        ilike(messages.subject, `%${query}%`),
+        ilike(messages.snippet, `%${query}%`),
+        ilike(messages.body, `%${query}%`),
+        ilike(messages.participants, `%${query}%`),
+      )
+    : undefined;
   return db
     .select({
       id: messages.id,
@@ -178,8 +191,9 @@ export async function findMessagesByIdentity(identityId: string): Promise<Messag
       createdAt: messages.createdAt,
     })
     .from(messages)
-    .where(eq(messages.identityId, identityId))
-    .orderBy(desc(messages.occurredAt));
+    .where(search ? and(eq(messages.identityId, identityId), search) : eq(messages.identityId, identityId))
+    .orderBy(desc(messages.occurredAt))
+    .limit(limit);
 }
 
 /**

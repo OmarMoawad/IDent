@@ -174,6 +174,39 @@ describe("comms/store: messages", () => {
     await app.close();
   });
 
+  it("searches subject, snippet, body, and participants case-insensitively without crossing identities", async () => {
+    const app = buildApp();
+    const identityA = await createTestIdentity(app);
+    const identityB = await createTestIdentity(app);
+    const sourceA = await insertConnectedSource({ identityId: identityA, provider: "gmail" });
+    const sourceB = await insertConnectedSource({ identityId: identityB, provider: "gmail" });
+    const fields = [
+      { externalId: "subject", subject: "Quarterly PLAN" },
+      { externalId: "snippet", snippet: "quarterly plan snippet" },
+      { externalId: "body", body: "The quarterly plan is attached" },
+      { externalId: "participants", participants: '[{"name":"Quarterly Plan Owner","address":"owner@example.com"}]' },
+    ];
+    for (const [index, input] of fields.entries()) {
+      await upsertMessage({ identityId: identityA, sourceId: sourceA.id, occurredAt: new Date(2026, 7, index + 1), ...input });
+    }
+    await upsertMessage({ identityId: identityB, sourceId: sourceB.id, externalId: "private", subject: "Quarterly plan", occurredAt: new Date() });
+
+    const found = await findMessagesByIdentity(identityA, { query: "QUARTERLY plan" });
+    expect(found.map((message) => message.externalId)).toEqual(["participants", "body", "snippet", "subject"]);
+    await app.close();
+  });
+
+  it("caps a caller-requested result limit at 100", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const source = await insertConnectedSource({ identityId, provider: "gmail" });
+    for (let index = 0; index < 101; index++) {
+      await upsertMessage({ identityId, sourceId: source.id, externalId: `bounded-${index}`, occurredAt: new Date(2026, 0, index + 1) });
+    }
+    expect(await findMessagesByIdentity(identityId, { limit: 1000 })).toHaveLength(100);
+    await app.close();
+  });
+
   it("never returns another identity's messages, even by direct id lookup", async () => {
     const app = buildApp();
     const identityA = await createTestIdentity(app);
