@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { parseMessageParticipants, participantLabel } from "@ident/shared";
 import { apiGet, apiPost } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
 import styles from "./inbox.module.css";
@@ -12,14 +13,17 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 
+/**
+ * Session 16 parsed this column as a flat array while the Gmail sync
+ * writes an `{from, to}` envelope, so `.map` threw on every real synced
+ * message and the catch quietly turned all of them into "Unknown sender".
+ * Both sides now go through one shared parser — see
+ * parseMessageParticipants in @ident/shared for why that lives there.
+ */
 function participantSummary(raw: string | null): string {
-  if (!raw) return "Unknown sender";
-  try {
-    const participants = JSON.parse(raw) as Array<{ name?: string; address: string }>;
-    return participants.map((participant) => participant.name || participant.address).join(", ") || "Unknown sender";
-  } catch {
-    return "Unknown sender";
-  }
+  const { from, to } = parseMessageParticipants(raw);
+  const people = from.length > 0 ? from : to;
+  return people.map(participantLabel).join(", ") || "Unknown sender";
 }
 
 export function InboxClient() {
@@ -77,6 +81,10 @@ export function InboxClient() {
     try {
       const result = await apiPost<{ messagesSeen: number; messagesUpserted: number }>(`/identity/connections/gmail/${source.id}/sync`, {}, auth.sessionToken);
       await loadMessages();
+      // Contacts are derived from messages, so new mail can mean new
+      // people. Failing to refresh them must not fail the sync itself —
+      // the messages are already saved by this point.
+      await apiPost("/identity/contacts/rebuild", {}, auth.sessionToken).catch(() => undefined);
       setStatus(`Sync complete: ${result.messagesSeen} seen, ${result.messagesUpserted} saved.`);
     } catch (reason) {
       setError(errorMessage(reason));
@@ -125,7 +133,7 @@ export function InboxClient() {
     <main className={styles.shell}>
       <header className={styles.header}>
         <div><span className={styles.eyebrow}>IDent Communications Hub</span><h1>Inbox</h1></div>
-        <nav aria-label="Primary"><Link href="/inbox">Inbox</Link><Link href="/account">Account</Link></nav>
+        <nav aria-label="Primary"><Link href="/inbox">Inbox</Link><Link href="/contacts">Contacts</Link><Link href="/account">Account</Link></nav>
       </header>
 
       {error && <p role="alert" className={styles.error}>{error}</p>}

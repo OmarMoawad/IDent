@@ -40,6 +40,30 @@ describe("InboxClient", () => {
     await waitFor(() => expect(apiPost).toHaveBeenCalled());
   });
 
+  it("names the sender from the {from,to} envelope the sync actually writes", async () => {
+    // Regression: session 16 parsed this column as a flat array, so every
+    // real synced message rendered as "Unknown sender". This fixture is
+    // deliberately the exact shape gmail-sync-service.ts writes.
+    const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
+    const participants = JSON.stringify({
+      from: [{ name: "Jane Doe", address: "jane@example.com" }],
+      to: [{ address: "me@example.com" }],
+    });
+    const message = { id: "message-1", subject: "Project Atlas", snippet: "Latest update", body: null, participants, occurredAt: "2026-08-13T10:00:00Z", isRead: false, source };
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]);
+    render(<InboxClient />);
+    expect(await screen.findByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.queryByText("Unknown sender")).not.toBeInTheDocument();
+  });
+
+  it("still says Unknown sender when a message genuinely has no usable participants", async () => {
+    const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
+    const message = { id: "message-1", subject: "Project Atlas", snippet: null, body: null, participants: "not json", occurredAt: "2026-08-13T10:00:00Z", isRead: false, source };
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]);
+    render(<InboxClient />);
+    expect(await screen.findByText("Unknown sender")).toBeInTheDocument();
+  });
+
   it("renders, searches, reads plain text, and preserves the list on sync failure", async () => {
     const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
     const message = { id: "message-1", subject: "Project Atlas", snippet: "Latest update", body: null, participants: null, occurredAt: "2026-08-13T10:00:00Z", isRead: false, source };
