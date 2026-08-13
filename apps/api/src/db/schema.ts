@@ -317,6 +317,22 @@ export const messages = pgTable(
     // yet (that's a later Phase 1 session, "Contact cards"); kept as an
     // opaque blob here rather than guessing at that table's eventual shape.
     participants: text("participants"),
+    /**
+     * "message" | "notification". The schema comment above always claimed
+     * this table was the unified message/notification shape; until session
+     * 20 only messages existed. Notifications share the table rather than
+     * getting their own because ROADMAP.md's Phase 1 promise is a single
+     * unified inbox — two tables would mean two lists to merge on read and
+     * two shapes for every downstream feature (search, priorities, the
+     * assistant) to learn.
+     */
+    kind: text("kind").notNull().default("message"),
+    /**
+     * Where a notification points ("view the pull request"). Validated to
+     * http/https on write — a `javascript:` URL rendered as a link is
+     * stored XSS, and this value comes from outside.
+     */
+    actionUrl: text("action_url"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     isRead: boolean("is_read").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -559,4 +575,30 @@ export const priorityRules = pgTable(
     uniqueIndex("priority_rules_identity_match_idx").on(table.identityId, table.matchType, table.matchValue),
     index("priority_rules_identity_idx").on(table.identityId),
   ],
+);
+
+
+/**
+ * Phase 1 session 20 — notification ingestion.
+ *
+ * A per-identity opaque token that external services POST notifications
+ * to. Same shape as Receiptless's inbound forwarding address (that repo
+ * solved this first): the token *is* the credential, so it is high-entropy
+ * and opaque, and an unknown one is indistinguishable from a known one
+ * that produced nothing.
+ *
+ * Push rather than poll because that is how notifications actually arrive
+ * — a service tells you something happened. Nothing here schedules work.
+ */
+export const notificationEndpoints = pgTable(
+  "notification_endpoints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" })
+      .unique(),
+    token: text("token").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
 );

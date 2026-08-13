@@ -155,6 +155,26 @@ describe("importance controls (session 19)", () => {
     expect(screen.getByText("Newsletter")).toBeInTheDocument();
   });
 
+  it("exposes a way to run the review from the UI", async () => {
+    // Regression: the classify action existed in code but no button
+    // rendered it, so the feature was unreachable and every other
+    // priority test still passed. Assert the entry point, not just the
+    // behaviour behind it.
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([message]).mockResolvedValueOnce([]);
+    render(<InboxClient />);
+    const review = await screen.findByRole("button", { name: "Review priorities" });
+
+    apiPost.mockResolvedValueOnce({ classified: 1 });
+    apiGet.mockResolvedValueOnce([]);
+    fireEvent.click(review);
+
+    await waitFor(() =>
+      expect(apiPost).toHaveBeenCalledWith("/identity/priorities/classify", {}, "token"),
+    );
+    // And it says plainly that nothing was hidden.
+    expect(await screen.findByRole("status")).toHaveTextContent(/Nothing was hidden/);
+  });
+
   it("lets the user override one call", async () => {
     apiGet
       .mockResolvedValueOnce([source])
@@ -205,5 +225,90 @@ describe("importance controls (session 19)", () => {
         "token",
       ),
     );
+  });
+});
+
+describe("notifications in the unified inbox (session 20)", () => {
+  const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
+  const mail = {
+    id: "m1",
+    subject: "Lunch Friday?",
+    snippet: "still on?",
+    body: null,
+    isRead: true,
+    kind: "message",
+    actionUrl: null,
+    occurredAt: "2026-08-01T10:00:00.000Z",
+    participants: JSON.stringify({ from: [{ address: "jane@example.com" }], to: [] }),
+    source,
+  };
+  const notification = {
+    id: "n1",
+    subject: "Review requested",
+    snippet: "on PR #12",
+    body: "on PR #12",
+    isRead: false,
+    kind: "notification",
+    actionUrl: "https://github.example/pr/12",
+    occurredAt: "2026-08-02T10:00:00.000Z",
+    participants: JSON.stringify({ from: [{ name: "GitHub", address: "github@notifications.ident" }], to: [] }),
+    source,
+  };
+
+  function load(messages: unknown[]) {
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce(messages).mockResolvedValueOnce([]);
+  }
+
+  it("lists mail and notifications together by default", async () => {
+    // Phase 1's first bullet is a single unified inbox, not two lists.
+    load([notification, mail]);
+    render(<InboxClient />);
+
+    expect(await screen.findByText("Review requested")).toBeInTheDocument();
+    expect(screen.getByText("Lunch Friday?")).toBeInTheDocument();
+    expect(screen.getByText("Notification")).toBeInTheDocument();
+  });
+
+  it("can narrow to one kind and back to both", async () => {
+    load([notification, mail]);
+    render(<InboxClient />);
+    await screen.findByText("Review requested");
+
+    apiGet.mockResolvedValueOnce([notification]);
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    await waitFor(() =>
+      expect(apiGet).toHaveBeenCalledWith("/identity/messages?kind=notification", "token"),
+    );
+
+    apiGet.mockResolvedValueOnce([notification, mail]);
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    // No kind param — "All" must not be a third filter value.
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith("/identity/messages", "token"));
+  });
+
+  it("renders the action link for a notification that has one", async () => {
+    load([notification]);
+    render(<InboxClient />);
+    await screen.findByText("Review requested");
+
+    apiGet.mockResolvedValueOnce(notification);
+    fireEvent.click(screen.getByRole("button", { name: /Review requested/ }));
+
+    const link = await screen.findByRole("link", { name: /Open in GitHub/ });
+    expect(link).toHaveAttribute("href", "https://github.example/pr/12");
+    // Opening an untrusted third-party URL must not hand it window.opener.
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  });
+
+  it("reveals the ingest endpoint on request rather than showing it by default", async () => {
+    load([]);
+    render(<InboxClient />);
+    const button = await screen.findByRole("button", { name: "Show ingest endpoint" });
+    // The token is a credential, so it isn't rendered until asked for.
+    expect(screen.queryByText(/notifications\/ingest/)).not.toBeInTheDocument();
+
+    apiGet.mockResolvedValueOnce({ path: "/notifications/ingest/abc123" });
+    fireEvent.click(button);
+    expect(await screen.findByText(/\/notifications\/ingest\/abc123/)).toBeInTheDocument();
   });
 });

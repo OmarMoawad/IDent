@@ -46,13 +46,40 @@ export function InboxClient() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [priorities, setPriorities] = useState<Record<string, Priority>>({});
+  const [kind, setKind] = useState<"" | "message" | "notification">("");
+  const [endpoint, setEndpoint] = useState<string | null>(null);
 
-  const loadMessages = useCallback(async (nextQuery = query) => {
+  const loadMessages = useCallback(async (nextQuery = query, nextKind = kind) => {
     if (!auth) return;
-    const path = nextQuery ? `/identity/messages?query=${encodeURIComponent(nextQuery)}` : "/identity/messages";
-    const result = await apiGet<InboxMessage[]>(path, auth.sessionToken);
+    const params = new URLSearchParams();
+    if (nextQuery) params.set("query", nextQuery);
+    // No kind param means both — the inbox is unified by default and the
+    // segments are a view, not a filter that hides anything permanently.
+    if (nextKind) params.set("kind", nextKind);
+    const suffix = params.toString();
+    const result = await apiGet<InboxMessage[]>(`/identity/messages${suffix ? `?${suffix}` : ""}`, auth.sessionToken);
     setMessages(result);
-  }, [auth, query]);
+  }, [auth, query, kind]);
+
+  async function showKind(next: "" | "message" | "notification") {
+    setKind(next);
+    setError(null);
+    try {
+      await loadMessages(query, next);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  }
+
+  async function revealEndpoint() {
+    if (!auth) return;
+    try {
+      const result = await apiGet<{ path: string }>("/identity/notifications/endpoint", auth.sessionToken);
+      setEndpoint(result.path);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  }
 
   useEffect(() => {
     if (restoring) return;
@@ -206,6 +233,35 @@ export function InboxClient() {
       {error && <p role="alert" className={styles.error}>{error}</p>}
       {status && <p role="status" className={styles.status}>{status}</p>}
 
+      <section className={styles.sources} aria-labelledby="notifications-heading">
+        <div>
+          <h2 id="notifications-heading">Notifications</h2>
+          <p>
+            Notifications from connected services arrive in this same inbox.
+            {endpoint ? ` Send them to ${endpoint}` : ""}
+          </p>
+        </div>
+        {/* The token is a credential, so it is fetched on request rather
+            than rendered on every inbox load. */}
+        <button onClick={revealEndpoint}>{endpoint ? "Shown" : "Show ingest endpoint"}</button>
+      </section>
+
+      <section className={styles.sources} aria-label="Filter by kind">
+        <div role="group" aria-label="Show">
+          <button onClick={() => showKind("")} aria-pressed={kind === ""}>All</button>{" "}
+          <button onClick={() => showKind("message")} aria-pressed={kind === "message"}>Messages</button>{" "}
+          <button onClick={() => showKind("notification")} aria-pressed={kind === "notification"}>Notifications</button>
+        </div>
+      </section>
+
+      <section className={styles.sources} aria-labelledby="priority-heading">
+        <div>
+          <h2 id="priority-heading">Priorities</h2>
+          <p>Labels only. Nothing is hidden or deleted, and you can override any call.</p>
+        </div>
+        <button onClick={classify}>Review priorities</button>
+      </section>
+
       <section className={styles.sources} aria-labelledby="sources-heading">
         <div><h2 id="sources-heading">Connected sources</h2>{connected.map((source) => <p key={source.id}>{source.providerAccountEmail ?? "Gmail"} · {source.status}</p>)}</div>
         {connected.length === 0 ? <button onClick={connectGmail}>Connect Gmail</button> : connected.map((source) => <button key={source.id} onClick={() => sync(source)} disabled={workingSource === source.id}>{workingSource === source.id ? "Syncing…" : "Sync now"}</button>)}
@@ -222,7 +278,7 @@ export function InboxClient() {
           <section className={styles.list} aria-label="Messages">
             {messages.map((message) => (
               <button key={message.id} className={styles.message} onClick={() => openMessage(message)} aria-pressed={selected?.id === message.id}>
-                <span className={styles.messageTop}><strong>{message.subject || "(No subject)"}</strong>{!message.isRead && <span className={styles.unread}>Unread</span>}</span>
+                <span className={styles.messageTop}><strong>{message.subject || "(No subject)"}</strong>{message.kind === "notification" && <span className={styles.unread}>Notification</span>}{!message.isRead && message.kind !== "notification" && <span className={styles.unread}>Unread</span>}</span>
                 <span>{participantSummary(message.participants)}</span><span>{message.snippet || "No preview available"}</span>
                 <span className={styles.messageMeta}>{message.source?.providerAccountEmail || message.source?.provider || "Unknown source"} · <time dateTime={message.occurredAt}>{new Date(message.occurredAt).toLocaleString()}</time></span>
                 {priorities[message.id] && (
@@ -253,6 +309,15 @@ export function InboxClient() {
                   <button onClick={() => setPriority(selected.id, "low")}>Mark low</button>{" "}
                   <button onClick={() => alwaysPrioritize(selected)}>Always prioritize this sender</button>
                 </p>
+                {selected.actionUrl && (
+                  // The URL is validated to http/https at ingest, so this
+                  // link can never be a javascript: payload.
+                  <p>
+                    <a href={selected.actionUrl} target="_blank" rel="noopener noreferrer">
+                      Open in {participantSummary(selected.participants)}
+                    </a>
+                  </p>
+                )}
                 <pre>{selected.body || selected.snippet || "No message body available."}</pre>
               </>
             ) : (

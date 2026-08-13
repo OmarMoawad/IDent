@@ -99,6 +99,13 @@
       "when": 1786631677528,
       "tag": "0013_loud_shaman",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786637498587,
+      "tag": "0014_left_photon",
+      "breakpoints": true
     }
   ]
 }

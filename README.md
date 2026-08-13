@@ -70,3 +70,18 @@ that core mission, not instead of it.
 - **AI Assistant Layer** — cross-cutting assistant with scoped access to the above
 
 Full sequencing and rationale for this ordering is in [ROADMAP.md](ROADMAP.md).
+
+### Notifications (session 20)
+
+Notifications from third-party services land in the same unified inbox as
+mail, discriminated by `kind`.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /identity/notifications/endpoint` | The caller's own opaque ingest path |
+| `POST /notifications/ingest/:token` | Where a service posts; the token is the credential |
+| `GET /identity/messages?kind=notification` | Segment the unified list |
+
+`actionUrl` is validated to http/https at ingest — a `javascript:` URL
+rendered as a link is stored XSS. An unknown token returns 202 rather than
+404 so the endpoint can't be probed for valid tokens.

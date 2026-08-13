@@ -5,6 +5,7 @@ import { registerGmailRoutes } from "./comms/gmail-routes.js";
 import { registerAssistantRoutes } from "./assistant/assistant-routes.js";
 import { registerImportanceRoutes } from "./assistant/importance-routes.js";
 import { registerCalendarRoutes } from "./comms/calendar-routes.js";
+import { registerNotificationRoutes } from "./notifications/notification-routes.js";
 import { registerContactRoutes } from "./comms/contacts-routes.js";
 import { registerInboxRoutes } from "./comms/inbox-routes.js";
 import { checkDbHealth } from "./db/pool.js";
@@ -45,6 +46,7 @@ export function buildApp(): FastifyInstance {
   registerCalendarRoutes(app);
   registerAssistantRoutes(app);
   registerImportanceRoutes(app);
+  registerNotificationRoutes(app);
 
   return app;
 }

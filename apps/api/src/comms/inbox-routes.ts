@@ -10,7 +10,7 @@ import {
   type Message,
 } from "./store.js";
 
-type MessageQuery = { query?: string };
+type MessageQuery = { query?: string; kind?: string };
 type MessageParams = { messageId: string };
 
 async function authenticatedIdentity(request: FastifyRequest) {
@@ -50,8 +50,16 @@ export function registerInboxRoutes(app: FastifyInstance): void {
     if (query.length > 200) return reply.code(400).send({ error: "Search query must be 200 characters or fewer." });
     // Fetch the identity's sources once and join in memory, rather than a
     // per-message findConnectedSourceById (an N+1 across up to 100 rows).
+    // Both kinds by default — the inbox is unified. An explicit kind
+    // narrows to one segment; an unrecognized one is rejected rather than
+    // silently returning everything.
+    const kind = request.query.kind;
+    if (kind && kind !== "message" && kind !== "notification") {
+      return reply.code(400).send({ error: "kind must be 'message' or 'notification'." });
+    }
+
     const [rows, sources] = await Promise.all([
-      findMessagesByIdentity(identity.identityId, { query }),
+      findMessagesByIdentity(identity.identityId, { query, kind }),
       findConnectedSourcesByIdentity(identity.identityId),
     ]);
     const sourceById = new Map(sources.map((source) => [source.id, source]));

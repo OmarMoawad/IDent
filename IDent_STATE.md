@@ -5,7 +5,53 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-13 — **Sessions 17b, 18 and 19 done: Phase 1's
+Last updated: 2026-08-13 — **Session 20: notifications. Phase 1's scope is
+now actually complete, not just its session cadence.**
+
+The eight-session cadence read 8/8 with every numbered item struck
+through, but ROADMAP.md's Phase 1 opens with *"Unified inbox: messages
+**and notifications** pulled from connected sources"* and its exit
+criteria names a *"notification/inbox aggregator"*. Notifications had
+never been built — the only occurrence of the word in the codebase was a
+schema comment claiming `messages` was "the unified message/notification
+shape". The cadence was a plan, and finishing the plan turned out not to
+be the same thing as finishing the phase.
+
+Built: a per-identity opaque ingest token (stable across calls, so an
+endpoint already pasted into a third-party service doesn't change
+underneath the user), an unauthenticated-by-session `POST
+/notifications/ingest/:token` where the token *is* the credential, and
+notifications stored in the **same** `messages` table discriminated by
+`kind`. One table rather than two because Phase 1's promise is a single
+unified inbox — two would mean merging on every read and teaching every
+downstream feature (search, priorities, the assistant) two shapes. They
+are searchable, classifiable, and assistant-retrievable for free as a
+result.
+
+Security decisions worth keeping: an unknown token returns 202, not 404,
+so the endpoint can't be used to probe which tokens exist; `actionUrl` is
+validated to http/https at ingest, because a `javascript:` URL rendered
+as a link is stored XSS and this value arrives from outside; and payload
+validation runs only *after* the token resolves, so a bad caller learns
+nothing about what a valid payload looks like.
+
+**Also fixed two UI gaps that shipped silently in session 19.** Two
+scripted edits to `inbox-client.tsx` failed to match their anchor and
+did nothing, and I didn't check — so the "Review priorities" button was
+never rendered. The classify endpoint existed, was tested, and was
+unreachable from the app. Every priority test still passed because they
+all exercised behaviour behind the missing entry point rather than the
+entry point itself. There is now a test that clicks the button.
+
+239 tests (208 API + 31 web), workspace typecheck, and production build
+all pass.
+
+**Still not verified:** no real Anthropic key and no real Google OAuth
+client, so neither integration is proven against a live provider; and
+real-browser click-through of the new pages is pending. **Phase 2 is not
+re-baselined** — that is the next session's first task.
+
+Previously — **Sessions 17b, 18 and 19 done: Phase 1's
 Communications Hub cadence is complete (8/8).**
 
 - **17b — Calendar + reminders.** Google Calendar as a *second scope on the
