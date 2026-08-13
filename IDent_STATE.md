@@ -5,7 +5,23 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-12 — **Session 15 done**: real Gmail message sync,
+Last updated: 2026-08-13 — **Session 16 done**: the protected unified inbox,
+the fourth slice of **Phase 1: Communications Hub**. The new `/inbox` page
+lists connected Gmail sources, starts OAuth when none exist, triggers the
+existing on-demand sync, searches the normalized identity-scoped message
+store, and opens message detail in a responsive plain-text reader. Three
+new bearer-protected API routes expose sanitized connection metadata,
+bounded search/list results, and tenant-isolated message detail; foreign
+message IDs return 404 and encrypted token data never crosses the API.
+Message bodies render as React text rather than provider HTML. A Vitest +
+Testing Library web harness now covers auth restoration/redirect, source
+states, list/search/clear/detail behavior, inert body text, and preserving
+the last good list on sync failure. Automated verification passes with 129
+tests total (126 API + 3 web), workspace-wide typecheck, and production
+build. Real-browser inbox click-through remains pending; the separately
+recorded revoked-token source-state design also remains deliberately open.
+
+Previously, 2026-08-12 — **Session 15 done**: real Gmail message sync,
 the third slice of **Phase 1: Communications Hub**. Built directly on
 item 2.5's now-proven connector and session 14's `getActiveGmailAccessToken`
 (refresh handled there already — this session never re-touches that logic):
@@ -587,9 +603,10 @@ session 13 laid the schema/data-model foundation (`connected_sources`,
 real Gmail OAuth connector — connect, refresh, disconnect, all encrypted,
 tested, and backed by real Google Cloud credentials — and session 15 (see
 this file's header) built real on-demand message sync on top of it,
-pulling recent Gmail messages into the `messages` table. Still no UI —
-see "Next tasks" below for the full session-by-session sequencing (next:
-session 4 of that list, "Unified inbox UI").
+pulling recent Gmail messages into the `messages` table. Session 16 added
+the protected unified inbox UI plus identity-scoped connection/message
+read APIs. See "Next tasks" below for the remaining cadence (next: contact
+cards).
 
 Done so far: register with a username + password (with a real client-side
 Account Master Key generated, wrapped, and sent to the server), log in with
@@ -1300,12 +1317,10 @@ block Phase 0B and none should be designed now:
   architecture-decision note above. A narrow, accepted gap specific to
   `/identity/webauthn/login/options`; password login already closed the
   equivalent hole.
-- **No frontend automated test harness** — see the architecture-decision
-  note above. Worth setting up once apps/web has enough surface that
-  manual click-throughs become the bottleneck. Now three sessions running
-  on manual verification alone (register/login/passkeys, then session
-  persistence) — worth revisiting this trade-off if a fourth frontend
-  slice is about to ship the same way.
+- **Frontend coverage is still focused rather than comprehensive.** Session
+  16 added the first Vitest + Testing Library harness for apps/web and
+  covers the unified inbox. Older register/login/passkey/account flows
+  remain browser-verified but do not yet have component-level coverage.
 
 ## Next tasks, in order
 
@@ -1385,11 +1400,12 @@ UI before intelligence, mirroring how Phase 0B itself was built
    could surface. Needs its own design, not a bolt-on; revisit once the
    unified inbox UI (below) exists to actually show such a status.
 
-4. **Unified inbox UI.** List/read/search messages across whatever
-   sources are connected — the first user-facing surface of Phase 1, and
-   what finally gives session 15's `/sync` route a caller. Exit-criteria-
-   relevant: this is what makes IDent "daily-driver usable as a
-   notification/inbox aggregator" per ROADMAP.md's own bar.
+4. ~~**Unified inbox UI.**~~ — done in session 16 (see this file's header):
+   protected `/inbox`, connected-source controls, on-demand sync,
+   list/search/clear/detail states, plain-text body rendering, responsive
+   UI, identity-scoped provider-neutral read APIs, and the first apps/web
+   automated test harness. Automated checks are green; real-browser inbox
+   click-through remains pending and is not claimed.
 
 5. **Contact cards.** Unify contacts surfaced by connected sources into
    one record per person — not calling/communications routing yet (that's
