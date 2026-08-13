@@ -29,8 +29,7 @@ function publicSource(source: ConnectedSource) {
   };
 }
 
-async function publicMessage(message: Message) {
-  const source = await findConnectedSourceById(message.sourceId);
+function shapeMessage(message: Message, source: ConnectedSource | null) {
   return {
     ...message,
     source: source ? { id: source.id, provider: source.provider, providerAccountEmail: source.providerAccountEmail } : null,
@@ -49,7 +48,14 @@ export function registerInboxRoutes(app: FastifyInstance): void {
     if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
     const query = request.query.query?.trim() ?? "";
     if (query.length > 200) return reply.code(400).send({ error: "Search query must be 200 characters or fewer." });
-    return Promise.all((await findMessagesByIdentity(identity.identityId, { query })).map(publicMessage));
+    // Fetch the identity's sources once and join in memory, rather than a
+    // per-message findConnectedSourceById (an N+1 across up to 100 rows).
+    const [rows, sources] = await Promise.all([
+      findMessagesByIdentity(identity.identityId, { query }),
+      findConnectedSourcesByIdentity(identity.identityId),
+    ]);
+    const sourceById = new Map(sources.map((source) => [source.id, source]));
+    return rows.map((message) => shapeMessage(message, sourceById.get(message.sourceId) ?? null));
   });
 
   app.get<{ Params: MessageParams }>("/identity/messages/:messageId", async (request, reply) => {
@@ -57,6 +63,6 @@ export function registerInboxRoutes(app: FastifyInstance): void {
     if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
     const message = await findMessageByIdForIdentity(request.params.messageId, identity.identityId);
     if (!message) return reply.code(404).send({ error: "Message not found." });
-    return publicMessage(message);
+    return shapeMessage(message, await findConnectedSourceById(message.sourceId));
   });
 }
