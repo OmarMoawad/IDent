@@ -427,3 +427,68 @@ export const contacts = pgTable(
     index("contacts_identity_last_seen_idx").on(table.identityId, table.lastSeenAt),
   ],
 );
+
+/**
+ * Phase 1 session 17b — Calendar. Events pulled from a connected Google
+ * Calendar, normalized the same "unify, don't replace" way messages are.
+ *
+ * Mirrors `messages` deliberately: identityId denormalized so per-identity
+ * queries are one indexed lookup, a (sourceId, externalId) unique index so
+ * re-syncing is idempotent, and the same composite foreign key tying
+ * sourceId and identityId together so a row can never belong to one
+ * identity while pointing at another's connected source.
+ */
+export const calendarEvents = pgTable(
+  "calendar_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    sourceId: uuid("source_id").notNull(),
+    externalId: text("external_id").notNull(),
+    title: text("title"),
+    description: text("description"),
+    location: text("location"),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    isAllDay: boolean("is_all_day").notNull().default(false),
+    // JSON-encoded Participant[] — same shape and shared parser as
+    // messages.participants (see @ident/shared).
+    attendees: text("attendees"),
+    status: text("status"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("calendar_events_source_external_id_idx").on(table.sourceId, table.externalId),
+    index("calendar_events_identity_starts_at_idx").on(table.identityId, table.startsAt),
+    foreignKey({
+      name: "calendar_events_source_identity_fk",
+      columns: [table.sourceId, table.identityId],
+      foreignColumns: [connectedSources.id, connectedSources.identityId],
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * User-authored reminders — the other half of the "calendar + reminders"
+ * session. Deliberately *not* derived from anything: unlike contacts,
+ * these are the user's own words, so they are a system of record and
+ * nothing may rebuild or overwrite them.
+ */
+export const reminders = pgTable(
+  "reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    notes: text("notes"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("reminders_identity_due_at_idx").on(table.identityId, table.dueAt)],
+);

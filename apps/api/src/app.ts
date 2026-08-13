@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { HealthStatus } from "@ident/shared";
 import { registerGmailRoutes } from "./comms/gmail-routes.js";
+import { registerCalendarRoutes } from "./comms/calendar-routes.js";
 import { registerContactRoutes } from "./comms/contacts-routes.js";
 import { registerInboxRoutes } from "./comms/inbox-routes.js";
 import { checkDbHealth } from "./db/pool.js";
@@ -39,6 +40,7 @@ export function buildApp(): FastifyInstance {
   registerGmailRoutes(app);
   registerInboxRoutes(app);
   registerContactRoutes(app);
+  registerCalendarRoutes(app);
 
   return app;
 }
