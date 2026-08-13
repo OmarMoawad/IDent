@@ -382,3 +382,48 @@ export const oauthStateChallenges = pgTable(
   },
   (table) => [uniqueIndex("oauth_state_challenges_state_idx").on(table.state)],
 );
+
+/**
+ * Phase 1 session 17 — Contact cards. One row per person an identity has
+ * actually corresponded with, unified across every connected source.
+ *
+ * Derived, not authored: every column here is recomputed from `messages`
+ * (see comms/contacts-service.ts), so this table is a materialized read
+ * model rather than a system of record. That is a deliberate choice over
+ * a user-editable address book — ROADMAP.md's Phase 1 entry scopes this
+ * session to "just a unified read model", and a derived table can be
+ * rebuilt from scratch at any time without losing anything a user typed.
+ * When user-authored fields (notes, a preferred name, merged duplicates)
+ * eventually arrive they belong in a *separate* table keyed to this one,
+ * so a rebuild can never overwrite them.
+ *
+ * Keyed on the lowercased email address (see shared's participantKey):
+ * the only stable cross-message identifier a mail source actually
+ * provides. Display names vary message to message ("J. Doe", "Jane Doe"),
+ * so the most recently seen non-empty one wins rather than the first.
+ */
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    // Lowercased; the unique index below is what makes "one row per
+    // person per identity" a database guarantee rather than a convention
+    // the derivation code has to remember.
+    address: text("address").notNull(),
+    displayName: text("display_name"),
+    messageCount: integer("message_count").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("contacts_identity_address_idx").on(table.identityId, table.address),
+    // Matches the list query's shape (WHERE identityId = ? ORDER BY
+    // lastSeenAt DESC) as a single index scan — most-recent contacts
+    // first is the default a contact list is actually read in.
+    index("contacts_identity_last_seen_idx").on(table.identityId, table.lastSeenAt),
+  ],
+);
