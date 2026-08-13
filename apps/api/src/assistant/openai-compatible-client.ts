@@ -6,9 +6,16 @@ import {
 import type { AssistantAnswer, AssistantClient } from "./assistant-client.js";
 
 /**
- * One implementation for every backend that speaks OpenAI's
- * `/chat/completions` shape — Ollama, vLLM, llama.cpp's server, and the
- * hosted OpenAI-compatible APIs.
+ * One implementation for backends exposing OpenAI's `/chat/completions`
+ * shape — Ollama, vLLM, llama.cpp's server, and the hosted
+ * OpenAI-compatible APIs.
+ *
+ * "OpenAI-compatible" is endpoint-specific and version-dependent, not one
+ * identical wire format: each project documents a different subset of
+ * supported fields and behaviours. This client deliberately sends only the
+ * intersection every one of them documents — model, messages, max_tokens —
+ * and each backend still needs verifying rather than assuming equivalence.
+ * Only Ollama has been exercised so far.
  *
  * Written against raw fetch rather than pulling in a second SDK: the
  * request is four fields and the response is one, and a dependency whose

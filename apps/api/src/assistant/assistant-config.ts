@@ -45,11 +45,19 @@ export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
  * over ~12 retrieved items, and the default is set from measurement rather
  * than instinct.
  *
- * On an M1 with 5.3 GiB of usable VRAM, `llama3.1:8b` (4.92 GB) occupies
- * 93% of it and spends nearly all of a request loading weights: 39s for a
- * three-token reply, and the live suite timed out. `llama3.2:3b` (2.02 GB)
- * answered the same request in 4.1s — roughly 10x — and passes all three
- * live tests including the grounding check.
+ * Measured on one configuration: M1, 8 GB **unified memory** (Apple
+ * Silicon has no separate VRAM), ~5.3 GiB reported available to the Ollama
+ * runtime, Ollama 0.32.9, both models Q4_K_M. A single cold run of a
+ * three-token reply took 39s on `llama3.1:8b` (4.92 GB) versus 4.1s on
+ * `llama3.2:3b` (2.02 GB), and the live suite timed out on the former and
+ * passed 3/3 on the latter.
+ *
+ * Two caveats worth keeping, both raised in review: a three-token reply is
+ * not a capacity benchmark, and while the 8B occupying ~93% of available
+ * memory is a plausible explanation for the latency, it is an inference
+ * from wall-clock rather than a measurement. Ollama returns per-phase
+ * timing fields; session 22 is to rerun under a documented method using
+ * them.
  *
  * Bigger is available via ASSISTANT_MODEL on hardware that can hold it.
  */

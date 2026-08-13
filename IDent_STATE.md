@@ -1732,6 +1732,122 @@ elevation is enforced" burden instead. Not urgent, not part of the Phase 1
 sequence above — do it alongside whichever Phase 3+ slice adds the first
 real High/Critical route.
 
+## Sessions 22–24 — foundation before features (DO THESE NEXT)
+
+Inserted ahead of the Phase 2 cadence below on CTO review, 2026-08-13. The
+instruction was explicit: **pause new surface area until one
+production-like vertical slice is exercised.** Phase 2's eight sessions do
+not start until sessions 22 and 23 are done, and session 24 is a hard
+prerequisite for Phase 2's own session 5.
+
+The reasoning: this repo has accumulated 266 tests across ten sessions with
+no production-like environment and no real OAuth integration. Every
+external dependency is exercised against a fake. Building further on that
+compounds risk.
+
+### Session 22 — evidence and claims discipline (no accounts needed)
+
+Start here; none of it is blocked.
+
+1. **Land the stack.** Five PRs (#1 → #2 → #3 → #4 → #5) sit unmerged and
+   `main` is twenty-five commits stale. Nothing is finished in a branch.
+2. **Real-browser click-through of the four new pages.** `/calendar`,
+   `/assistant`, the inbox importance controls and notifications have never
+   been opened in a browser. The two previous click-throughs each found
+   bugs a passing suite had missed — unreadable cards, and a button that
+   was never rendered at all. Expected yield here is high, and the
+   assistant now runs locally so it can be exercised against a real model.
+3. **Replace binary "proven" with scoped evidence,** throughout this file
+   and the README. The form the CTO asked for: *"exercised end to end on
+   one M1 development configuration against `llama3.2:3b`, three
+   live-provider tests, at commit `d045a7b`"* — not "proven end-to-end".
+   Also attach durable links (CI run, PR, SHA, timestamp) to every status
+   or numeric claim.
+4. **Define an explicit egress classification policy.** `isLoopbackUrl` is
+   too coarse for the guarantee the UI makes. Classify into named tiers and
+   surface the tier, not a boolean:
+   - same process / Unix socket
+   - loopback
+   - same machine via a non-loopback interface
+   - private LAN or VPN / private overlay
+   - public internet
+
+   A LAN endpoint **is** egress from the user's machine even though it is
+   not public-internet egress, and today it is reported as such only by
+   accident of the hostname check. Specify behaviour for hostnames
+   resolving to several addresses, redirects, proxies, and DNS rebinding.
+5. **Change the local-mode disclosure from absence to assertion.** Hiding
+   the third-party warning was right; showing *nothing* is not. State
+   positively where processing happens — "Processed locally at
+   `http://localhost:11434`" — so the claim is verifiable rather than
+   merely absent.
+6. **Publish a reproducible benchmark method** and rerun under it. The
+   current 39 s / 4.1 s figures are a single cold run of a three-token
+   reply, which is not a capacity benchmark. Record: hardware and total
+   unified memory; macOS and Ollama versions; model digest and
+   quantization; the prompt and expected answer; context size and sampling
+   settings; cold-start versus warm timings; prompt-eval and generation
+   durations separately; tokens/second; the timeout used; and several runs
+   with median and range. Ollama returns timing fields — use them rather
+   than inferring cause from wall-clock.
+7. **Correct the terminology.** Apple Silicon has **unified memory**, not
+   VRAM (this machine: 8 GB total, ~5.3 GiB reported available to the
+   runtime). Local inference has **no per-request provider charge** — it is
+   not "zero marginal cost", which ignores power, hardware and support.
+   OpenAI compatibility is **endpoint-specific and version-dependent**
+   across Ollama, vLLM and llama.cpp — not one identical wire format — so
+   each backend needs its own verification rather than an assumption of
+   equivalence.
+8. **Stop asserting that 93% memory occupancy caused the latency.** It is a
+   plausible inference, not a measured fact. Either demonstrate it with
+   Ollama's timing fields or state it as a hypothesis.
+
+### Session 23 — one production-like vertical slice (needs Omar's accounts)
+
+Same bar as Receiptless's session 10. All of these, not a subset: real
+identity and OAuth (a genuine Google account, not a fake client); secret
+management with nothing in the repo or build logs; observability (error
+tracking and a log drain); a rollback procedure documented *and rehearsed*;
+readiness checks exercised against the real database; and a migration
+procedure run as a release step.
+
+The slice: connect a real Google account → sync real mail and calendar →
+they appear in the unified inbox → the assistant answers a grounded
+question about them. IDent has no hosting plan at all yet, so that decision
+comes first.
+
+### Session 24 — write-action threat model and design review (before Phase 2 session 5)
+
+Design only. No implementation until this is reviewed.
+
+Today the assistant's protection against prompt injection is structural:
+no code path leads from a model response back into the database. Phase 2
+session 5 removes that, and the earlier plan — "pending action plus a
+separate authenticated request" — is a starting point the CTO correctly
+judged insufficient. A separate endpoint alone does not stop the model
+from shaping the payload the user believes they are confirming.
+
+The design must specify, and the threat model must justify:
+
+- **Server-generated, immutable action payloads** — the model proposes
+  intent; the server constructs what actually executes
+- **User and tenant binding** on every pending action
+- **Expiry and one-time execution**
+- **Idempotency**
+- **Step-up authentication** for sensitive actions (this repo already has
+  elevation — reuse it)
+- **Authorization and target-state revalidation at execution time**, not
+  only at creation
+- **A human-readable preview generated independently of model prose**, so
+  the confirmation shows what will happen rather than what the model says
+  will happen
+- **Defence against hidden or ambiguous parameters** injected into the
+  action
+- **Audit logging** of proposal, confirmation and execution
+
+Write the injection test first: a message whose body asks the assistant to
+send mail must, at most, produce a pending action a human has to approve.
+
 ## Session cadence for Phase 2 — re-baselined 2026-08-13
 
 Phase 2 is "Productivity & Real-Time Comms" (ROADMAP.md), and its exit
