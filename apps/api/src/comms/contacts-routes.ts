@@ -2,9 +2,13 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { parseMessageParticipants, participantKey } from "@ident/shared";
 import { extractBearerToken } from "../identity/http.js";
 import { validateSession } from "../identity/service.js";
-import { findContactByIdForIdentity, findContactsByIdentity, type Contact } from "./contacts-store.js";
+import {
+  findContactByIdForIdentity,
+  findContactsByIdentity,
+  findMessagesForParticipant,
+  type Contact,
+} from "./contacts-store.js";
 import { rebuildContactsForIdentity } from "./contacts-service.js";
-import { findMessagesByIdentity } from "./store.js";
 
 type ContactQuery = { query?: string };
 type ContactParams = { contactId: string };
@@ -63,9 +67,13 @@ export function registerContactRoutes(app: FastifyInstance): void {
     const contact = await findContactByIdForIdentity(request.params.contactId, identity.identityId);
     if (!contact) return reply.code(404).send({ error: "Contact not found." });
 
-    // The contact's recent messages, filtered from the identity's own
-    // already-scoped message list — never a separate unscoped query.
-    const messages = (await findMessagesByIdentity(identity.identityId, { limit: 100 }))
+    // Queried by participant in the database and identity-scoped there,
+    // rather than post-filtering the newest-100 window: a contact whose
+    // mail is older than the 100 most recent messages overall would
+    // otherwise show no messages at all. The database match is a substring
+    // prefilter on the JSON blob, so an exact participant check still runs
+    // here before anything is returned.
+    const messages = (await findMessagesForParticipant(identity.identityId, contact.address, MAX_CONTACT_MESSAGES))
       .filter((message) => {
         const { from, to } = parseMessageParticipants(message.participants);
         return [...from, ...to].some((participant) => participantKey(participant.address) === contact.address);

@@ -172,6 +172,103 @@ describe("Contact card routes", () => {
     await app.close();
   });
 
+  it("keeps contacts that only appear in mail older than the newest 100 messages", async () => {
+    // Regression: derivation used to read the inbox's newest-100 window and
+    // then replace the whole contact set, so anyone who hadn't emailed
+    // recently was deleted, and counts/first-seen drifted as the window moved.
+    const app = buildApp();
+    const identity = await register(app);
+    const source = await insertConnectedSource({ identityId: identity.identityId, provider: "gmail" });
+
+    // One old message from a contact who never appears again...
+    await upsertMessage({
+      identityId: identity.identityId,
+      sourceId: source.id,
+      externalId: "old-1",
+      subject: "Ancient history",
+      participants: participants([{ name: "Old Friend", address: "old.friend@example.com" }]),
+      occurredAt: new Date("2020-01-01T10:00:00Z"),
+    });
+    // ...buried under more than a full window of newer mail.
+    for (let index = 0; index < 120; index++) {
+      await upsertMessage({
+        identityId: identity.identityId,
+        sourceId: source.id,
+        externalId: `recent-${index}`,
+        subject: `Recent ${index}`,
+        participants: participants([{ address: "busy@example.com" }]),
+        occurredAt: new Date(Date.UTC(2026, 0, 1, 0, index)),
+      });
+    }
+
+    const rebuild = await app.inject({
+      method: "POST",
+      url: "/identity/contacts/rebuild",
+      headers: bearer(identity.sessionToken),
+    });
+    expect(rebuild.json().messagesScanned).toBe(121);
+
+    const list = await app.inject({ method: "GET", url: "/identity/contacts", headers: bearer(identity.sessionToken) });
+    const byAddress = Object.fromEntries(list.json().map((contact: { address: string }) => [contact.address, contact]));
+    expect(byAddress["old.friend@example.com"]).toBeDefined();
+    // The whole mailbox is counted, not one window of it.
+    expect(byAddress["busy@example.com"].messageCount).toBe(120);
+    expect(byAddress["busy@example.com"].firstSeenAt).toBe(new Date(Date.UTC(2026, 0, 1, 0, 0)).toISOString());
+
+    // And the old contact's own messages are still reachable on detail,
+    // even though they fall outside the newest-100 window.
+    const detail = await app.inject({
+      method: "GET",
+      url: `/identity/contacts/${byAddress["old.friend@example.com"].id}`,
+      headers: bearer(identity.sessionToken),
+    });
+    expect(detail.json().messages).toHaveLength(1);
+    expect(detail.json().messages[0].subject).toBe("Ancient history");
+
+    // Rebuilding again must be stable, not erode history.
+    await app.inject({ method: "POST", url: "/identity/contacts/rebuild", headers: bearer(identity.sessionToken) });
+    const after = await app.inject({ method: "GET", url: "/identity/contacts", headers: bearer(identity.sessionToken) });
+    expect(after.json()).toHaveLength(2);
+    await app.close();
+  });
+
+  it("does not let a substring address match another contact's messages", async () => {
+    const app = buildApp();
+    const identity = await register(app);
+    const source = await insertConnectedSource({ identityId: identity.identityId, provider: "gmail" });
+    await upsertMessage({
+      identityId: identity.identityId,
+      sourceId: source.id,
+      externalId: "sub-1",
+      subject: "To the longer address",
+      participants: participants([{ address: "notjane@example.com" }]),
+      occurredAt: new Date("2026-08-10T10:00:00Z"),
+    });
+    await upsertMessage({
+      identityId: identity.identityId,
+      sourceId: source.id,
+      externalId: "sub-2",
+      subject: "To Jane",
+      participants: participants([{ address: "jane@example.com" }]),
+      occurredAt: new Date("2026-08-11T10:00:00Z"),
+    });
+    await app.inject({ method: "POST", url: "/identity/contacts/rebuild", headers: bearer(identity.sessionToken) });
+
+    const list = await app.inject({
+      method: "GET",
+      url: "/identity/contacts?query=jane@example.com",
+      headers: bearer(identity.sessionToken),
+    });
+    const jane = list.json().find((contact: { address: string }) => contact.address === "jane@example.com");
+    const detail = await app.inject({
+      method: "GET",
+      url: `/identity/contacts/${jane.id}`,
+      headers: bearer(identity.sessionToken),
+    });
+    expect(detail.json().messages.map((message: { subject: string }) => message.subject)).toEqual(["To Jane"]);
+    await app.close();
+  });
+
   it("bounds the search query", async () => {
     const app = buildApp();
     const identity = await register(app);

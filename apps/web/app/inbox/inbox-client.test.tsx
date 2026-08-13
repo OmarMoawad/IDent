@@ -40,6 +40,40 @@ describe("InboxClient", () => {
     await waitFor(() => expect(apiPost).toHaveBeenCalled());
   });
 
+  it("says so when contacts could not be refreshed after an otherwise good sync", async () => {
+    const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]);
+    render(<InboxClient />);
+    await screen.findByRole("button", { name: "Sync now" });
+
+    apiPost
+      .mockResolvedValueOnce({ messagesSeen: 3, messagesUpserted: 3 }) // sync succeeds
+      .mockRejectedValueOnce(new Error("rebuild exploded")); // contacts rebuild fails
+    apiGet.mockResolvedValueOnce([]);
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("Sync complete: 3 seen, 3 saved.");
+    expect(status).toHaveTextContent("Contacts could not be refreshed");
+    // The sync itself is still reported as successful, not as an error.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("reports a plain success when both sync and the contact refresh work", async () => {
+    const source = { id: "source-1", provider: "gmail", status: "connected", providerAccountEmail: "me@example.com" };
+    apiGet.mockResolvedValueOnce([source]).mockResolvedValueOnce([]);
+    render(<InboxClient />);
+    await screen.findByRole("button", { name: "Sync now" });
+
+    apiPost.mockResolvedValueOnce({ messagesSeen: 2, messagesUpserted: 2 }).mockResolvedValueOnce({ contactCount: 1 });
+    apiGet.mockResolvedValueOnce([]);
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("Sync complete: 2 seen, 2 saved.");
+    expect(status).not.toHaveTextContent("could not be refreshed");
+  });
+
   it("names the sender from the {from,to} envelope the sync actually writes", async () => {
     // Regression: session 16 parsed this column as a flat array, so every
     // real synced message rendered as "Unknown sender". This fixture is

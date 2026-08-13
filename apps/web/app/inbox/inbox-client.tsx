@@ -82,10 +82,17 @@ export function InboxClient() {
       const result = await apiPost<{ messagesSeen: number; messagesUpserted: number }>(`/identity/connections/gmail/${source.id}/sync`, {}, auth.sessionToken);
       await loadMessages();
       // Contacts are derived from messages, so new mail can mean new
-      // people. Failing to refresh them must not fail the sync itself —
-      // the messages are already saved by this point.
-      await apiPost("/identity/contacts/rebuild", {}, auth.sessionToken).catch(() => undefined);
-      setStatus(`Sync complete: ${result.messagesSeen} seen, ${result.messagesUpserted} saved.`);
+      // people. A failure here must not fail the sync — the messages are
+      // already saved — but it must not be hidden either: contacts would
+      // be silently stale while the UI claimed everything succeeded.
+      let contactsRefreshed = true;
+      try {
+        await apiPost("/identity/contacts/rebuild", {}, auth.sessionToken);
+      } catch {
+        contactsRefreshed = false;
+      }
+      const synced = `Sync complete: ${result.messagesSeen} seen, ${result.messagesUpserted} saved.`;
+      setStatus(contactsRefreshed ? synced : `${synced} Contacts could not be refreshed — open Contacts and rebuild.`);
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {

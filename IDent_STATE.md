@@ -36,6 +36,30 @@ call it — with a regression test using the exact shape the sync writes.
 This is a concrete argument for the still-pending real-browser
 click-through, not an argument that it is now unnecessary.
 
+**Code review addressed, 2026-08-13.** The review caught a real design
+error in this session's own work:
+
+- **Contacts were derived from the inbox's newest-100 window, then used to
+  replace the entire contact set.** Past ~100 messages that silently
+  deleted anyone who hadn't emailed recently, and made `messageCount` and
+  `firstSeenAt` drift further from the truth on every rebuild as the
+  window advanced. A contact list is a claim about the *whole* mailbox, so
+  it now derives from a dedicated identity-scoped query over all messages
+  (keyset-batched on `(occurredAt, id)`, selecting only the two columns
+  derivation needs, with a 50k safety ceiling). The detail route had the
+  same flaw — it post-filtered the global newest-100, so a contact whose
+  mail was older showed *no* messages — and now queries by participant in
+  the database, with the `ILIKE` treated as a prefilter and an exact
+  participant check still applied before anything is returned.
+- **A failed contact rebuild after sync was swallowed entirely**, so the
+  UI reported complete success while contacts were stale. The sync is
+  still not failed by it (the messages really did save), but the status
+  now says so and points at the Contacts page.
+
+169 tests (153 API + 16 web), including a regression test that buries an
+old contact under 120 newer messages and asserts it survives a rebuild
+with accurate counts.
+
 **Real-browser click-through done, 2026-08-13** — and it earned its keep by
 finding two more bugs neither the test suite nor typecheck could see:
 

@@ -1,6 +1,10 @@
 import { parseMessageParticipants, participantKey, type Participant } from "@ident/shared";
-import { findConnectedSourcesByIdentity, findMessagesByIdentity } from "./store.js";
-import { replaceContactsForIdentity, type DerivedContact } from "./contacts-store.js";
+import { findConnectedSourcesByIdentity } from "./store.js";
+import {
+  findAllParticipantRowsForIdentity,
+  replaceContactsForIdentity,
+  type DerivedContact,
+} from "./contacts-store.js";
 
 /**
  * Phase 1 session 17 — Contact cards.
@@ -93,16 +97,21 @@ export function deriveContacts(
 export type RebuildContactsResult = { contactCount: number; messagesScanned: number };
 
 /**
- * Recomputes and stores the identity's contact list from its messages.
- * Reads through findMessagesByIdentity, so it inherits that query's own
- * identity scoping and result cap rather than re-implementing either.
+ * Recomputes and stores the identity's contact list from **all** its
+ * messages, not the inbox's newest-100 read window.
+ *
+ * That distinction is load-bearing, because replaceContactsForIdentity
+ * deletes the existing set before inserting: deriving from a partial
+ * window would delete real contacts that simply hadn't emailed recently,
+ * and would make messageCount and firstSeenAt drift further from the truth
+ * on every rebuild as the window advanced.
  */
 export async function rebuildContactsForIdentity(identityId: string): Promise<RebuildContactsResult> {
-  const [messages, sources] = await Promise.all([
-    findMessagesByIdentity(identityId, { limit: 100 }),
+  const [rows, sources] = await Promise.all([
+    findAllParticipantRowsForIdentity(identityId),
     findConnectedSourcesByIdentity(identityId),
   ]);
-  const derived = deriveContacts(messages, ownAddresses(sources));
+  const derived = deriveContacts(rows, ownAddresses(sources));
   const contactCount = await replaceContactsForIdentity(identityId, derived);
-  return { contactCount, messagesScanned: messages.length };
+  return { contactCount, messagesScanned: rows.length };
 }
