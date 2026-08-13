@@ -5,7 +5,41 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-13 — **Session 17 done**: contact cards, the fifth
+Last updated: 2026-08-13 — **Sessions 17b, 18 and 19 done: Phase 1's
+Communications Hub cadence is complete (8/8).**
+
+- **17b — Calendar + reminders.** Google Calendar as a *second scope on the
+  existing connection* rather than a second provider (the cadence entry
+  said to decide at session start; this is that decision, and its cost). A
+  grant made before this session has Gmail scope only, so scope is checked
+  at read time and a stale grant gets an explicit reconnect prompt rather
+  than an opaque 403. Reminders are user-authored — unlike contacts, a
+  system of record nothing rebuilds.
+- **18 — The read-only AI assistant.** **Provider decided with Omar:
+  Anthropic's Claude API** (`claude-opus-5`), on the grounds that its
+  business-API terms don't train on inputs by default — the weakest link in
+  any assistant over someone's inbox — not on raw capability. **Egress
+  decided with Omar too: send only what's needed and disclose it**,
+  enforced in code rather than policy. The assistant never receives the
+  mailbox; it gets a bounded, truncated, relevance-selected slice, and
+  every answer reports how much left the server. Tests assert the
+  *negative*: unrelated mail and other identities' data are absent from the
+  outbound payload. See SECURITY.md § AI Assistant Privacy.
+- **19 — Negotiated importance filtering.** Built to ROADMAP.md's
+  constraints rather than to what was simplest: priorities are a separate
+  annotation and never a filter; every call is explained; the classifier is
+  a transparent heuristic *so that* the explanation is real; a user's
+  stated rule beats the guess, and a per-message override survives
+  re-classification.
+
+203 tests (187 API + 16 web), workspace typecheck, and production build all
+pass. **Not verified:** no real Anthropic API key has been used — the
+assistant is covered by a fake client only — and real-browser click-through
+of `/contacts`, the calendar, and the assistant is still pending. Phase 1's
+cadence is complete; **Phase 2 is not re-baselined yet**, and that is the
+next session's first task.
+
+Previously — **Session 17 done**: contact cards, the fifth
 slice of **Phase 1: Communications Hub**. A new `contacts` table holds one
 row per person an identity has corresponded with, unified across connected
 sources and keyed on the lowercased email address. It is a **derived read
@@ -1514,17 +1548,44 @@ UI before intelligence, mirroring how Phase 0B itself was built
    a derived read model. Revisit when there's a reason to let users edit
    contacts.
 
-6. **Calendar + reminders.** Likely a second OAuth scope on the same
-   Gmail/Google connection from Session 2 (Google Calendar), or a second
-   provider — decide when this session starts, informed by whichever
-   provider Session 2 actually picked.
+6. ~~**Calendar + reminders.**~~ — done in session 17b. Decided as asked
+   when the session started: **a second scope on the existing Google
+   connection**, not a second provider — one consent screen, one token to
+   refresh, one disconnect. The cost, stated plainly: a source connected
+   before this session has Gmail scope only, so the granted scope is
+   checked at read time (`hasCalendarScope`) and a stale grant gets an
+   explicit reconnect prompt rather than an opaque 403. `calendar_events`
+   mirrors `messages` and preserves Google's all-day/timed distinction;
+   reminders are user-authored, so unlike contacts they are a system of
+   record nothing rebuilds.
 
-7. **Basic AI assistant (paid tier, the monetization wedge — see
-   BOOTSTRAP.md).** Read-only Q&A over the user's own inbox/calendar/
-   contacts. **Needs Omar**: which LLM provider/API — not decided
-   anywhere in this repo yet, don't default to one silently.
+7. ~~**Basic AI assistant (paid tier, the monetization wedge).**~~ — done
+   in session 18. **Provider decided with Omar (2026-08-13): Anthropic's
+   Claude API** (`claude-opus-5`) — chosen because its business-API terms
+   don't train on inputs by default, which is the weakest link in an
+   assistant over someone's inbox, not because of raw capability. Egress
+   posture also decided with Omar: **send only what's needed, and disclose
+   it**, enforced in `assistant/assistant-retrieval.ts` rather than in
+   policy — at most 12 messages / 10 events / 10 contacts / 10 reminders,
+   each truncated, chosen by relevance. Tests assert the *negative*: that
+   unrelated mail and other identities' data are absent from the outbound
+   payload. Retrieved mail is treated as untrusted input, and the
+   structural protection is that no code path leads from a model response
+   back into the database. See SECURITY.md § AI Assistant Privacy.
 
-8. **AI-assisted importance filtering (paid).** The most design-heavy
+8. ~~**AI-assisted importance filtering (paid).**~~ — done in session 19,
+   built directly against ROADMAP.md's constraints. Priorities are a
+   **separate annotation on their own endpoint, never a filter** over the
+   message list — a client that ignores the feature sees every message
+   unchanged, which is asserted by test. Every call carries a
+   human-readable reason, and the classifier is a **transparent heuristic
+   rather than a model call** precisely so that reason is real rather than
+   "the model said so". Precedence encodes the roadmap's own rule: the
+   heuristic proposes, a user's per-contact or per-source rule overrides
+   it, and an explicit per-message override survives re-classification.
+   Original scope follows.
+
+   **AI-assisted importance filtering (paid).** The most design-heavy
    item in Phase 1's ROADMAP.md entry — re-read that entry's constraints
    before starting: negotiated not silent, nothing auto-hidden or
    auto-deleted, per-source/contact tunable, defers to the user's stated
