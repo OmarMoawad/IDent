@@ -5,6 +5,11 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
+> **Next action: Objective 0 — land the review stack.** Five PRs are open
+> and `main` is twenty-five commits behind. Everything else in this file is
+> blocked on that. See "Objective 0" near the end for the per-PR review
+> guide and merge order.
+
 Last updated: 2026-08-13 — **Session 20: notification ingestion and inbox
 aggregation.**
 
@@ -1732,7 +1737,43 @@ elevation is enforced" burden instead. Not urgent, not part of the Phase 1
 sequence above — do it alongside whichever Phase 3+ slice adds the first
 real High/Critical route.
 
-## Sessions 22–24 — foundation before features (DO THESE NEXT)
+## Objective 0 — land the review stack (BLOCKS EVERYTHING BELOW)
+
+**This is the first thing to work on. Nothing else starts until it is
+done.** Five PRs are open and `main` is twenty-five commits behind — the
+entire Communications Hub exists only in branches. Nothing here is finished
+while that is true, and a five-deep stack gets harder to land the longer it
+waits.
+
+Needs Omar's review; needs no accounts, no credentials, and no
+infrastructure.
+
+### Merge in order — each is based on its predecessor, not on `main`
+
+| PR | Focus of review | Est. |
+| --- | --- | --- |
+| [#1](https://github.com/OmarMoawad/IDent/pull/1) — unified inbox | Identity-scoped queries and the tenant-isolation pattern the rest builds on | ~10 min |
+| [#2](https://github.com/OmarMoawad/IDent/pull/2) — contact cards | Derivation over the whole mailbox, and why it replaces the set rather than merging | ~10 min |
+| [#3](https://github.com/OmarMoawad/IDent/pull/3) — calendar, assistant, importance | **Largest diff.** `assistant-retrieval.ts` *is* the privacy boundary — anything it does not return cannot reach a provider. Worth reading in full | ~30 min |
+| [#4](https://github.com/OmarMoawad/IDent/pull/4) — notifications | **Security-relevant.** Token hashing, the log-redaction serializer, and the uniform-202 ingest response. The question worth answering: is there any remaining way for a caller to distinguish a live token from a dead one? | ~20 min |
+| [#5](https://github.com/OmarMoawad/IDent/pull/5) — provider layer + local mode | The egress classification and whether the disclosure it drives is one you would stand behind publicly | ~15 min |
+
+Merging out of order will create conflicts, because each branch is based on
+the one before it rather than on `main`.
+
+### If review time is short
+
+Prioritise **#4** and **#3** — those carry the security-relevant changes.
+The others are feature work with narrower blast radius.
+
+### Done when
+
+- All five are merged and `main` contains them
+- CI is green **on `main`**, not only on the branches
+- The merged `agent/*` branches and their worktrees are deleted
+- `docs/progress.svg` regenerated from `main`
+
+## Sessions 22–24 — foundation before features (after Objective 0)
 
 Inserted ahead of the Phase 2 cadence below on CTO review, 2026-08-13. The
 instruction was explicit: **pause new surface area until one
@@ -1749,21 +1790,19 @@ compounds risk.
 
 Start here; none of it is blocked.
 
-1. **Land the stack.** Five PRs (#1 → #2 → #3 → #4 → #5) sit unmerged and
-   `main` is twenty-five commits stale. Nothing is finished in a branch.
-2. **Real-browser click-through of the four new pages.** `/calendar`,
+1. **Real-browser click-through of the four new pages.** `/calendar`,
    `/assistant`, the inbox importance controls and notifications have never
    been opened in a browser. The two previous click-throughs each found
    bugs a passing suite had missed — unreadable cards, and a button that
    was never rendered at all. Expected yield here is high, and the
    assistant now runs locally so it can be exercised against a real model.
-3. **Replace binary "proven" with scoped evidence,** throughout this file
+2. **Replace binary "proven" with scoped evidence,** throughout this file
    and the README. The form the CTO asked for: *"exercised end to end on
    one M1 development configuration against `llama3.2:3b`, three
    live-provider tests, at commit `d045a7b`"* — not "proven end-to-end".
    Also attach durable links (CI run, PR, SHA, timestamp) to every status
    or numeric claim.
-4. **Define an explicit egress classification policy.** `isLoopbackUrl` is
+3. **Define an explicit egress classification policy.** `isLoopbackUrl` is
    too coarse for the guarantee the UI makes. Classify into named tiers and
    surface the tier, not a boolean:
    - same process / Unix socket
@@ -1776,12 +1815,12 @@ Start here; none of it is blocked.
    not public-internet egress, and today it is reported as such only by
    accident of the hostname check. Specify behaviour for hostnames
    resolving to several addresses, redirects, proxies, and DNS rebinding.
-5. **Change the local-mode disclosure from absence to assertion.** Hiding
+4. **Change the local-mode disclosure from absence to assertion.** Hiding
    the third-party warning was right; showing *nothing* is not. State
    positively where processing happens — "Processed locally at
    `http://localhost:11434`" — so the claim is verifiable rather than
    merely absent.
-6. **Publish a reproducible benchmark method** and rerun under it. The
+5. **Publish a reproducible benchmark method** and rerun under it. The
    current 39 s / 4.1 s figures are a single cold run of a three-token
    reply, which is not a capacity benchmark. Record: hardware and total
    unified memory; macOS and Ollama versions; model digest and
@@ -1790,7 +1829,7 @@ Start here; none of it is blocked.
    durations separately; tokens/second; the timeout used; and several runs
    with median and range. Ollama returns timing fields — use them rather
    than inferring cause from wall-clock.
-7. **Correct the terminology.** Apple Silicon has **unified memory**, not
+6. **Correct the terminology.** Apple Silicon has **unified memory**, not
    VRAM (this machine: 8 GB total, ~5.3 GiB reported available to the
    runtime). Local inference has **no per-request provider charge** — it is
    not "zero marginal cost", which ignores power, hardware and support.
@@ -1798,7 +1837,7 @@ Start here; none of it is blocked.
    across Ollama, vLLM and llama.cpp — not one identical wire format — so
    each backend needs its own verification rather than an assumption of
    equivalence.
-8. **Stop asserting that 93% memory occupancy caused the latency.** It is a
+7. **Stop asserting that 93% memory occupancy caused the latency.** It is a
    plausible inference, not a measured fact. Either demonstrate it with
    Ollama's timing fields or state it as a hypothesis.
 
