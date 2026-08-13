@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../app.js";
 import { insertConnectedSource, upsertMessage } from "../comms/store.js";
-import { assistantModel } from "./assistant-config.js";
+import { assistantModel, resolveAssistantProvider } from "./assistant-config.js";
 import { askAssistant } from "./assistant-service.js";
 import { createConfiguredAssistantClient } from "./assistant-client.js";
 
@@ -17,9 +17,23 @@ import { createConfiguredAssistantClient } from "./assistant-client.js";
  * ordinary suite — no separate script to remember, and no way for the
  * repository to keep claiming the integration works without evidence.
  *
- * Cost is a few cents at most: three short requests.
+ * Cost is a few cents at most against a hosted provider, and nothing at
+ * all locally.
+ *
+ * The timeout is generous because a local model on modest hardware is
+ * genuinely slow — an 8B model on an M1 spends most of a request loading
+ * weights, not generating. A tight timeout here would report "broken" for
+ * something that is merely slow, which is a different problem with a
+ * different fix.
  */
-const hasKey = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+const LIVE_TIMEOUT_MS = Number(process.env.ASSISTANT_LIVE_TIMEOUT_MS ?? 300_000);
+/**
+ * Gated on *any* configured provider, not on an Anthropic key specifically.
+ * The first version checked ANTHROPIC_API_KEY, which meant a live local
+ * model — the whole point of the provider layer — still skipped these.
+ */
+const provider = resolveAssistantProvider();
+const hasProvider = provider !== null;
 
 async function seededIdentity(app: FastifyInstance) {
   const response = await app.inject({
@@ -46,7 +60,7 @@ async function seededIdentity(app: FastifyInstance) {
   return identity;
 }
 
-describe.skipIf(!hasKey)("assistant against the live Anthropic API", () => {
+describe.skipIf(!hasProvider)("assistant against the live provider", () => {
   it(`serves the configured model (${assistantModel()})`, async () => {
     // This is the assertion the SDK type union could not make. If the
     // identifier is wrong, this fails with the provider's own error and
@@ -57,8 +71,8 @@ describe.skipIf(!hasKey)("assistant against the live Anthropic API", () => {
     const answer = await client!.ask({ question: "Reply with the single word OK.", context: "(no data)" });
     expect(answer.text.length).toBeGreaterThan(0);
     // Recorded in the run output so the tested model and date are on file.
-    console.log(`[live] model=${assistantModel()} answered; tokens in/out=${answer.usage.inputTokens}/${answer.usage.outputTokens}`);
-  }, 60_000);
+    console.log(`[live] provider=${provider?.id} model=${assistantModel()} leavesMachine=${provider?.leavesMachine} answered; tokens in/out=${answer.usage.inputTokens}/${answer.usage.outputTokens}`);
+  }, LIVE_TIMEOUT_MS);
 
   it("answers a grounded question from the retrieved context", async () => {
     const app = buildApp();
@@ -71,7 +85,7 @@ describe.skipIf(!hasKey)("assistant against the live Anthropic API", () => {
     expect(result.answer).toMatch(/812/);
     expect(result.contextSent.messages).toBeGreaterThan(0);
     await app.close();
-  }, 60_000);
+  }, LIVE_TIMEOUT_MS);
 
   it("says it cannot find something that is not in the context", async () => {
     // The failure mode that matters: inventing an answer about the user's
@@ -86,13 +100,13 @@ describe.skipIf(!hasKey)("assistant against the live Anthropic API", () => {
     );
     expect(result.answer).toMatch(/not|no |couldn't|could not|don't|do not|unable/i);
     await app.close();
-  }, 60_000);
+  }, LIVE_TIMEOUT_MS);
 });
 
-describe.skipIf(hasKey)("assistant live tests", () => {
-  it("are skipped because ANTHROPIC_API_KEY is not set", () => {
+describe.skipIf(hasProvider)("assistant live tests", () => {
+  it("are skipped because no assistant provider is configured", () => {
     // Present so a run without a key still says out loud that the live
     // path is unproven, rather than silently reporting all-green.
-    expect(hasKey).toBe(false);
+    expect(hasProvider).toBe(false);
   });
 });
