@@ -94,3 +94,23 @@ delivery, malformed payload — so it cannot be used to test whether a token
 is live. Rejections are recorded against the endpoint for the owner to
 read, which is how a misconfigured sender stays debuggable without
 telling the sender anything.
+
+### Assistant providers (session 21)
+
+The assistant is provider-neutral. One OpenAI-compatible implementation
+covers Ollama, vLLM, llama.cpp's server, and the hosted OpenAI-compatible
+APIs; Anthropic has its own implementation because its wire shape differs
+(a refusal arrives as a normal 200 that must be checked before reading
+content).
+
+Run it fully locally — nothing leaves the machine:
+
+```bash
+ollama pull llama3.1:8b
+ASSISTANT_PROVIDER=local npm run dev:api
+```
+
+`GET /identity/assistant/status` reports `leavesMachine`, derived from the
+resolved base URL rather than the provider name, and the UI's disclosure
+follows it. With nothing configured the assistant is unavailable — it never
+falls back to a default that would ship data somewhere unchosen.

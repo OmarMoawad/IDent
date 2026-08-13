@@ -3,9 +3,9 @@ import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../app.js";
 import { insertConnectedSource, upsertMessage } from "../comms/store.js";
-import { ASSISTANT_MODEL } from "./assistant-config.js";
+import { assistantModel } from "./assistant-config.js";
 import { askAssistant } from "./assistant-service.js";
-import { createConfiguredClaudeClient } from "./claude-client.js";
+import { createConfiguredAssistantClient } from "./assistant-client.js";
 
 /**
  * The one thing the fake client cannot tell us: whether the configured
@@ -47,24 +47,24 @@ async function seededIdentity(app: FastifyInstance) {
 }
 
 describe.skipIf(!hasKey)("assistant against the live Anthropic API", () => {
-  it(`serves the configured model (${ASSISTANT_MODEL})`, async () => {
+  it(`serves the configured model (${assistantModel()})`, async () => {
     // This is the assertion the SDK type union could not make. If the
     // identifier is wrong, this fails with the provider's own error and
     // the default gets changed to whatever does work.
-    const client = createConfiguredClaudeClient();
+    const client = await createConfiguredAssistantClient();
     expect(client).not.toBeNull();
 
     const answer = await client!.ask({ question: "Reply with the single word OK.", context: "(no data)" });
     expect(answer.text.length).toBeGreaterThan(0);
     // Recorded in the run output so the tested model and date are on file.
-    console.log(`[live] model=${ASSISTANT_MODEL} answered; tokens in/out=${answer.usage.inputTokens}/${answer.usage.outputTokens}`);
+    console.log(`[live] model=${assistantModel()} answered; tokens in/out=${answer.usage.inputTokens}/${answer.usage.outputTokens}`);
   }, 60_000);
 
   it("answers a grounded question from the retrieved context", async () => {
     const app = buildApp();
     const identity = await seededIdentity(app);
 
-    const result = await askAssistant(identity.identityId, "What is the invoice total?", createConfiguredClaudeClient());
+    const result = await askAssistant(identity.identityId, "What is the invoice total?", await createConfiguredAssistantClient());
     expect(result.refused).toBe(false);
     // The figure is only available from the seeded message, so a correct
     // answer proves retrieval reached the model and grounding worked.
@@ -82,7 +82,7 @@ describe.skipIf(!hasKey)("assistant against the live Anthropic API", () => {
     const result = await askAssistant(
       identity.identityId,
       "What did my dentist say about my appointment?",
-      createConfiguredClaudeClient(),
+      await createConfiguredAssistantClient(),
     );
     expect(result.answer).toMatch(/not|no |couldn't|could not|don't|do not|unable/i);
     await app.close();

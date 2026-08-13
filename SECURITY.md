@@ -239,6 +239,31 @@ response. "Never touches another system" is not true of that architecture;
 stored beyond serving the response" is the accurate claim, and it's the one
 that should appear in front of users — not "100%" unqualified.
 
+### Local mode is built, as of session 21
+
+The paragraph below described local mode as a future tier. It is now a
+configuration change: the assistant runs against anything speaking
+OpenAI's `/chat/completions` shape, so pointing `ASSISTANT_BASE_URL` at a
+local Ollama means **no query leaves the machine**.
+
+Two things make this a real guarantee rather than a label:
+
+- Whether data leaves is derived from the resolved base URL, not from the
+  provider name. Pointing the "local" client at a remote host is reported
+  as egress, because a LAN or hosted address is still off-machine —
+  "not the public internet" is a different claim from "not off this
+  machine".
+- The disclosure in the UI changes with it. In local mode it says the data
+  does not leave, and the third-party sentence is *not* shown. Showing a
+  warning that is false in the current configuration teaches people to
+  ignore the ones that are true.
+
+What has **not** changed: this is the strongest privacy posture available
+here, but the quality/latency tradeoff against a hosted frontier model is
+real, and running a competitive model on your own hardware still costs
+money at any scale beyond one user. Local mode being *available* is not the
+same as it being the right default for a paid tier.
+
 **The actually-100%-private option** is running an open-weight model fully
 on-device or on hardware the user controls, so no query ever leaves their
 own device. That's a real, stronger tier — but it trades off response

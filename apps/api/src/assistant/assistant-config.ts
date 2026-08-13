@@ -11,28 +11,106 @@
  */
 
 /**
- * The model, overridable without a code change.
+ * Which backend answers, and — the part that matters for this product —
+ * whether a question leaves the machine at all.
  *
- * **What is actually established, and what isn't.** `claude-opus-5` is
- * present in the installed `@anthropic-ai/sdk` (0.116.0) model union.
- * That is evidence the SDK accepts the string; a review correctly pointed
- * out it is *not* evidence the live API serves that model, and no request
- * has ever been made. An earlier version of this comment called the
- * identifier "verified" — it wasn't, and that word is withdrawn.
- *
- * The same review suggested `claude-opus-4-20250514` as the default on the
- * strength of an Anthropic prompt-library example. That string is a dated
- * Opus 4 snapshot; the Opus 4 series is superseded, and prompt-library
- * pages are not maintained against model deprecations. Switching a default
- * to an older snapshot on that evidence would trade one unverified
- * identifier for one that is probably worse, so the default stands — but
- * it stands as a *choice pending verification*, not a settled fact.
- *
- * Settle it with a real request once ANTHROPIC_API_KEY exists; until then
- * ANTHROPIC_MODEL is the escape hatch, and IDent_STATE.md carries this as
- * an open item.
+ * One OpenAI-compatible implementation covers Ollama, vLLM, llama.cpp's
+ * server, and the hosted OpenAI-compatible APIs, because they all speak
+ * the same `/chat/completions` wire format. That is what makes "local
+ * mode" a configuration change rather than a rewrite, and it is why
+ * SECURITY.md can now describe local mode as built rather than promised.
  */
-export const ASSISTANT_MODEL = process.env.ANTHROPIC_MODEL?.trim() || "claude-opus-5";
+export type AssistantProviderId = "anthropic" | "openai_compatible";
+
+export type AssistantProvider = {
+  id: AssistantProviderId;
+  model: string;
+  baseUrl: string | null;
+  apiKey: string | null;
+  /** Shown to the user before they ask anything. */
+  destination: string;
+  /**
+   * Whether a question and its retrieved context leave this machine.
+   * Derived from the resolved base URL rather than assumed from the
+   * provider id — someone can point the OpenAI-compatible client at a
+   * remote host, and the disclosure must tell the truth in that case too.
+   */
+  leavesMachine: boolean;
+};
+
+/** Default for the Anthropic path. See the note below on its status. */
+export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
+/** A small instruction-following model is the right size for grounded Q&A over ~12 retrieved items. */
+export const DEFAULT_LOCAL_MODEL = "llama3.1:8b";
+export const DEFAULT_LOCAL_BASE_URL = "http://localhost:11434/v1";
+
+/**
+ * Loopback means the request never leaves the host. Anything else does,
+ * including a LAN address — "not the public internet" is not the same
+ * claim as "not off this machine", and the disclosure should not blur it.
+ */
+export function isLoopbackUrl(raw: string): boolean {
+  try {
+    const { hostname } = new URL(raw);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolves the provider from the environment. Returns null when nothing is
+ * configured — the assistant is then *unavailable*, never silently
+ * degraded to some default that quietly ships data somewhere.
+ *
+ * A note on `claude-opus-5`, kept because it has already been argued once:
+ * it is present in the installed SDK's model union, which shows the SDK
+ * accepts the string, not that the API serves it. No live request has been
+ * made. It is a choice pending verification, not a verified fact.
+ */
+export function resolveAssistantProvider(env: NodeJS.ProcessEnv = process.env): AssistantProvider | null {
+  const explicit = env.ASSISTANT_PROVIDER?.trim().toLowerCase();
+  const anthropicKey = env.ANTHROPIC_API_KEY?.trim() || null;
+  const baseUrl = env.ASSISTANT_BASE_URL?.trim() || null;
+
+  // Explicit configuration always wins; the fallbacks below only guess
+  // when nothing was stated.
+  const wantsLocal = explicit === "openai_compatible" || explicit === "local" || (!explicit && !anthropicKey && baseUrl);
+
+  if (wantsLocal) {
+    const resolvedUrl = baseUrl ?? DEFAULT_LOCAL_BASE_URL;
+    const loopback = isLoopbackUrl(resolvedUrl);
+    return {
+      id: "openai_compatible",
+      model: env.ASSISTANT_MODEL?.trim() || DEFAULT_LOCAL_MODEL,
+      baseUrl: resolvedUrl,
+      // Ollama needs no key; a hosted OpenAI-compatible endpoint will.
+      apiKey: env.ASSISTANT_API_KEY?.trim() || null,
+      destination: loopback ? `a model running on this machine (${resolvedUrl})` : resolvedUrl,
+      leavesMachine: !loopback,
+    };
+  }
+
+  if (explicit === "anthropic" || anthropicKey) {
+    if (!anthropicKey) return null;
+    const model = env.ANTHROPIC_MODEL?.trim() || env.ASSISTANT_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL;
+    return {
+      id: "anthropic",
+      model,
+      baseUrl: null,
+      apiKey: anthropicKey,
+      destination: "Anthropic",
+      leavesMachine: true,
+    };
+  }
+
+  return null;
+}
+
+/** Kept for callers that only need the model name. */
+export function assistantModel(env: NodeJS.ProcessEnv = process.env): string {
+  return resolveAssistantProvider(env)?.model ?? DEFAULT_ANTHROPIC_MODEL;
+}
 
 /**
  * Bounded so one question cannot ship an entire mailbox to a third party.
