@@ -5,7 +5,44 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-13 — **Session 16 done**: the protected unified inbox,
+Last updated: 2026-08-13 — **Session 17 done**: contact cards, the fifth
+slice of **Phase 1: Communications Hub**. A new `contacts` table holds one
+row per person an identity has corresponded with, unified across connected
+sources and keyed on the lowercased email address. It is a **derived read
+model, not an address book**: every column is recomputed from `messages`
+by `comms/contacts-service.ts`, so it can be rebuilt from scratch at any
+time — user-authored fields (notes, preferred names, manual merges), if
+they ever arrive, belong in a separate table so a rebuild can't overwrite
+them. Derivation unifies a person across sender/recipient roles and letter
+case, counts one interaction per message, keeps first/last-seen honest
+regardless of input order, prefers the most recently seen display name,
+and excludes the identity's *own* verified mailbox addresses so you are
+never your own top contact. Three bearer-protected routes (`GET
+/identity/contacts`, `POST /identity/contacts/rebuild`, `GET
+/identity/contacts/:contactId`) plus a protected `/contacts` page with
+searchable cards and a detail panel listing that person's recent messages;
+the inbox's sync now refreshes contacts, and a failure there cannot fail
+the sync. Rebuild is transactional and identity-scoped, so one identity's
+rebuild can never delete another's rows — covered by a test.
+
+**A real bug in session 16 was found and fixed on the way**, and it is the
+kind only a click-through or a realistic fixture catches: the inbox parsed
+`messages.participants` as a flat array while the Gmail sync writes an
+`{from, to}` envelope, so `.map` threw and the catch rendered **every real
+synced message as "Unknown sender"**. Session 16's test passed because its
+fixture used `participants: null`. The fix is structural rather than local
+— `parseMessageParticipants` now lives in `@ident/shared` and both sides
+call it — with a regression test using the exact shape the sync writes.
+This is a concrete argument for the still-pending real-browser
+click-through, not an argument that it is now unnecessary.
+
+161 tests (147 API + 14 web), workspace typecheck, and production build all
+pass. One pre-existing unrelated flake: `identity/password.test.ts` can
+exceed its 5s timeout under parallel load (argon2 is CPU-bound); it passes
+in isolation and predates this session. Real-browser click-through of
+`/contacts` and `/inbox` remains pending and is not claimed.
+
+Previously, 2026-08-13 — **Session 16 done**: the protected unified inbox,
 the fourth slice of **Phase 1: Communications Hub**. The new `/inbox` page
 lists connected Gmail sources, starts OAuth when none exist, triggers the
 existing on-demand sync, searches the normalized identity-scoped message
@@ -1407,9 +1444,17 @@ UI before intelligence, mirroring how Phase 0B itself was built
    automated test harness. Automated checks are green; real-browser inbox
    click-through remains pending and is not claimed.
 
-5. **Contact cards.** Unify contacts surfaced by connected sources into
-   one record per person — not calling/communications routing yet (that's
-   Phase 2+/Phase 10), just a unified read model.
+5. ~~**Contact cards.**~~ — done in session 17 (see this file's header):
+   the `contacts` table, `comms/contacts-service.ts` derivation,
+   `comms/contacts-store.ts`, three identity-scoped routes, and a
+   protected `/contacts` page. Kept to "just a unified read model" as
+   scoped — no calling/routing, and nothing user-editable yet. Also fixed
+   a real session-16 participants-parsing bug found while building this
+   (see header). **Open:** contact identity is one row per email address,
+   so the same human reached at two addresses is still two cards —
+   merging needs a user-authored layer, which is deliberately not part of
+   a derived read model. Revisit when there's a reason to let users edit
+   contacts.
 
 6. **Calendar + reminders.** Likely a second OAuth scope on the same
    Gmail/Google connection from Session 2 (Google Calendar), or a second
