@@ -1,0 +1,33 @@
+.shell { min-height: 100vh; padding: 2rem; background: #f4f1ea; color: #17211d; font-family: system-ui, sans-serif; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; max-width: 1100px; margin: 0 auto 2rem; }
+.header h1 { margin: .2rem 0 0; font-family: Georgia, serif; font-size: clamp(2rem, 6vw, 4rem); }
+.header nav { display: flex; gap: 1rem; }
+.eyebrow { color: #46705d; font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.toolbar, .search, .layout, .error, .status, .shell > p { max-width: 1100px; margin: 1rem auto; }
+.toolbar, .search { padding: 1rem; border: 1px solid #ccd4cd; border-radius: 14px; background: #fff; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.toolbar h2 { margin: 0 0 .35rem; }
+.toolbar p { margin: 0; color: #506057; }
+.shell button, .shell input { font: inherit; }
+.shell button { cursor: pointer; border: 1px solid #315c48; border-radius: 999px; padding: .65rem 1rem; background: #315c48; color: white; }
+.shell button:disabled { cursor: wait; opacity: .6; }
+.shell button:focus-visible, .shell input:focus-visible, .shell a:focus-visible { outline: 3px solid #c8883a; outline-offset: 3px; }
+.search label { display: block; margin-bottom: .5rem; font-weight: 700; }
+.search div { display: flex; gap: .5rem; flex-wrap: wrap; }
+.search input { flex: 1 1 15rem; border: 1px solid #8f9b94; border-radius: 999px; padding: .7rem 1rem; }
+.layout { display: grid; gap: 1rem; }
+.cards { display: grid; gap: .75rem; align-content: start; min-width: 0; }
+.card { display: grid; gap: .3rem; width: 100%; border: 1px solid #ccd4cd; border-radius: 14px; padding: 1rem; background: #fff; color: #17211d; text-align: left; }
+.card:hover, .card[aria-pressed="true"] { background: #eaf2ed; border-color: #96b3a4; }
+.cardName { font-family: Georgia, serif; font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
+.cardAddress { color: #506057; font-size: .9rem; overflow-wrap: anywhere; }
+.cardMeta { color: #66736c; font-size: .8rem; }
+.detail { min-width: 0; border: 1px solid #ccd4cd; border-radius: 14px; padding: 1.5rem; background: #fff; }
+.detail h2 { margin-top: 0; overflow-wrap: anywhere; }
+.detailMessages { display: grid; gap: .6rem; margin-top: 1rem; padding: 0; list-style: none; }
+.detailMessage { border-top: 1px solid #e4e7e3; padding-top: .6rem; }
+.detailMessage strong { display: block; overflow-wrap: anywhere; }
+.detailMessage span { color: #66736c; font-size: .8rem; }
+.error { padding: .8rem 1rem; border-radius: 10px; background: #fee9e7; color: #8b1f16; }
+.status { padding: .8rem 1rem; border-radius: 10px; background: #e4f4e9; color: #24543b; }
+@media (min-width: 760px) { .layout { grid-template-columns: minmax(18rem, .9fr) minmax(0, 1.4fr); } }
