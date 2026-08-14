@@ -5,10 +5,9 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-> **Next action: Objective 0 — land the review stack.** Five PRs are open
-> and `main` is twenty-five commits behind. Everything else in this file is
-> blocked on that. See "Objective 0" near the end for the per-PR review
-> guide and merge order.
+> **Next action: Sessions 22-24 — foundation before features.** Objective 0
+> is done: PRs #1-#5 are on `main`, CI is green there, and the `agent/*`
+> worktrees are gone. See "Sessions 22-24" near the end.
 
 Last updated: 2026-08-13 — **Session 20: notification ingestion and inbox
 aggregation.**
@@ -1749,16 +1748,48 @@ elevation is enforced" burden instead. Not urgent, not part of the Phase 1
 sequence above — do it alongside whichever Phase 3+ slice adds the first
 real High/Critical route.
 
-## Objective 0 — land the review stack (BLOCKS EVERYTHING BELOW)
+## Objective 0 — land the review stack (DONE, 2026-08-14)
 
-**This is the first thing to work on. Nothing else starts until it is
-done.** Five PRs are open and `main` is twenty-five commits behind — the
-entire Communications Hub exists only in branches. Nothing here is finished
-while that is true, and a five-deep stack gets harder to land the longer it
-waits.
+The Communications Hub is on `main` at `f18f755`, CI green. Kept here
+rather than deleted, for the merge lesson below.
 
-Needs Omar's review; needs no accounts, no credentials, and no
-infrastructure.
+**A stacked merge does not do what the merge order implies.** All five PRs
+were merged within fifteen seconds of each other and GitHub reported all
+five as `MERGED` — while `main` contained only #1. GitHub retargets a
+stacked PR's base to `main` only when the previous base branch is
+*deleted*, and that is asynchronous, so #2 through #5 each merged one
+level up the stack into their actual bases. Nothing was lost — the cascade
+left `agent/notifications` holding every PR head — and `main` was repaired
+by merging that branch directly (`f18f755`), whose tree was verified
+identical to it beforehand.
+
+**Next time, either** delete each base branch and wait for GitHub to
+retarget the next PR before merging it, **or** skip the ceremony and merge
+the top of the stack into `main` once. The failure is quiet: five green
+merged PRs, a `main` missing almost all of them, and a progress badge
+still reporting the pre-stack number. A deeper stack makes it worse, not
+better — this repo's was the deeper of the two and lost four of five.
+
+### Review finding, since this is where the stack was reviewed
+
+The question this file posed on PR #4 — is there any remaining way for a
+caller to distinguish a live token from a dead one? — turned out to have
+**two** answers, and the first was a real, wire-reachable oracle.
+
+`ingestNotification` handled `InvalidNotificationError` and rethrew
+everything else, which Fastify turned into a 500. Only a live token
+reaches that code; a dead one returns before any write. A NUL byte in
+`title` was enough to get there — it passes every type and length check,
+and Postgres then rejects the parameter as invalid UTF-8. So one request
+answered 500 for a live token and 202 for a dead one. Verified against the
+real database, and the regression tests were confirmed to fail against the
+unfixed service (`expected 500 to be 202`) before being kept. Fixed in
+`8f44435` on both sides: NUL is the sender's validation error now, and a
+catch-all means no future fallible write reopens the oracle in silence.
+
+The second answer is **timing**, and it is not fixed — see "Known
+failures / open issues" above, where it is recorded rather than claimed
+away.
 
 ### Merge in order — each is based on its predecessor, not on `main`
 
@@ -1778,12 +1809,16 @@ the one before it rather than on `main`.
 Prioritise **#4** and **#3** — those carry the security-relevant changes.
 The others are feature work with narrower blast radius.
 
-### Done when
+### Done when — all met except one
 
-- All five are merged and `main` contains them
-- CI is green **on `main`**, not only on the branches
-- The merged `agent/*` branches and their worktrees are deleted
-- `docs/progress.svg` regenerated from `main`
+- [x] All five merged and `main` contains them — verified by ancestry, not
+      by GitHub's `MERGED` label, which was wrong for four of the five
+- [x] CI green **on `main`** (`f18f755`)
+- [x] Worktrees and local branches deleted
+- [ ] **The five remote `agent/*` branches still exist** — deleting them
+      needs Omar; the agent's permissions stop at local deletion
+- [x] `docs/progress.svg` regenerated from `main` — already current at
+      18%, no diff
 
 ## Sessions 22–24 — foundation before features (after Objective 0)
 
