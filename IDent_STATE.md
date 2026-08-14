@@ -5,7 +5,268 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-Last updated: 2026-08-13 — **Session 16 done**: the protected unified inbox,
+> **Next action: Objective 0 — land the review stack.** Five PRs are open
+> and `main` is twenty-five commits behind. Everything else in this file is
+> blocked on that. See "Objective 0" near the end for the per-PR review
+> guide and merge order.
+
+Last updated: 2026-08-13 — **Session 20: notification ingestion and inbox
+aggregation.**
+
+Scoped precisely, because an earlier draft of this entry overclaimed:
+Phase 1's unified notification *ingestion and aggregation* are
+implemented. ROADMAP.md says notifications are "pulled from connected
+sources", and what exists is a **generic inbound webhook** — no
+notification-producing provider is integrated, and nothing has been
+validated end to end against a real one. That remains open.
+
+The eight-session cadence read 8/8 with every numbered item struck
+through, but ROADMAP.md's Phase 1 opens with *"Unified inbox: messages
+**and notifications** pulled from connected sources"* and its exit
+criteria names a *"notification/inbox aggregator"*. Notifications had
+never been built — the only occurrence of the word in the codebase was a
+schema comment claiming `messages` was "the unified message/notification
+shape". The cadence was a plan, and finishing the plan turned out not to
+be the same thing as finishing the phase.
+
+Built: a per-identity opaque ingest token (stable across calls, so an
+endpoint already pasted into a third-party service doesn't change
+underneath the user), an unauthenticated-by-session `POST
+/notifications/ingest/:token` where the token *is* the credential, and
+notifications stored in the **same** `messages` table discriminated by
+`kind`. One table rather than two because Phase 1's promise is a single
+unified inbox — two would mean merging on every read and teaching every
+downstream feature (search, priorities, the assistant) two shapes. They therefore **reuse** the existing search, priority, and
+assistant-retrieval paths rather than needing new ones. Shared storage
+reduces the work; it is not by itself proof that each of those features
+handles notification semantics correctly, and that is untested.
+
+**Review fixes, same day.** A review found two real security defects in
+the first cut of this, both now fixed:
+
+- **The ingest credential was being written to the request log.** The
+  token travelled as a URL path segment and Fastify logs `req.url`, so it
+  landed in application logs and would have flowed onward to any proxy or
+  tracing system. The token now travels in a header
+  (`x-ident-notification-token`); the URL form is kept for senders that
+  cannot set headers, and a log serializer redacts that path before it
+  reaches the logger. Only the **hash** is stored now, so a database dump
+  yields nothing usable, and minting returns the plaintext exactly once —
+  rotation doubles as revocation. There is a test that asserts against
+  real captured log output rather than reading the serializer.
+- **The "unknown token returns 202" claim was wrong.** Unknown returned
+  202 but a known token returned 201 or 400, so a malformed payload
+  distinguished a live token from a dead one in a single request. The
+  claim described a property the code did not have. Every outcome is now
+  202 with an identical body; rejections are recorded against the endpoint
+  where the *owner* — and only the owner — can read them, so a
+  misconfigured sender is still debuggable.
+
+Also fixed: concurrent first deliveries could create duplicate
+pseudo-sources, because the uniqueness constraint includes a nullable
+`providerAccountId` and Postgres treats NULLs as distinct. The
+pseudo-source now has a stable non-null account id and is created
+atomically.
+
+`actionUrl` remains validated to http/https at ingest — a `javascript:`
+URL rendered as a link is stored XSS and this value arrives from outside.
+
+**Also fixed two UI gaps that shipped silently in session 19.** Two
+scripted edits to `inbox-client.tsx` failed to match their anchor and
+did nothing, and I didn't check — so the "Review priorities" button was
+never rendered. The classify endpoint existed, was tested, and was
+unreachable from the app. Every priority test still passed because they
+all exercised behaviour behind the missing entry point rather than the
+entry point itself. There is now a test that clicks the button.
+
+245 tests (213 API + 32 web), workspace typecheck, and production build
+all pass.
+
+**Phase 2 is now re-baselined** (8 sessions, at the end of this file).
+Session 1 — extracting the Gmail-shaped OAuth lifecycle into a provider
+registry — needs no accounts and is what makes Slack, Notion, and Drive
+cheap rather than three copies of the same flow.
+
+**The assistant's model identifier is unverified, not verified.** An
+earlier note here called `claude-opus-5` "verified" on the strength of it
+appearing in the installed SDK's type union. A review correctly pointed
+out that an SDK union proves the SDK accepts a string, not that the API
+serves that model — and no live request has ever been made. The word is
+withdrawn. The default stands as a choice pending verification rather
+than a settled fact; `ANTHROPIC_MODEL` overrides it, and a single real
+request settles it.
+
+**Still not verified:** no real Anthropic key and no real Google OAuth
+client exist, so neither integration is proven against a live provider.
+Both need Omar to create them (console.anthropic.com and Google Cloud
+Console respectively); the code paths are complete and fail closed
+without them. Real-browser click-through of the new pages is also
+pending.
+
+Previously — **Sessions 17b, 18 and 19 done: Phase 1's
+Communications Hub cadence is complete (8/8).**
+
+- **17b — Calendar + reminders.** Google Calendar as a *second scope on the
+  existing connection* rather than a second provider (the cadence entry
+  said to decide at session start; this is that decision, and its cost). A
+  grant made before this session has Gmail scope only, so scope is checked
+  at read time and a stale grant gets an explicit reconnect prompt rather
+  than an opaque 403. Reminders are user-authored — unlike contacts, a
+  system of record nothing rebuilds.
+- **18 — The read-only AI assistant.** **Provider decided with Omar:
+  Anthropic's Claude API** (`claude-opus-5`), on the grounds that its
+  business-API terms don't train on inputs by default — the weakest link in
+  any assistant over someone's inbox — not on raw capability. **Egress
+  decided with Omar too: send only what's needed and disclose it**,
+  enforced in code rather than policy. The assistant never receives the
+  mailbox; it gets a bounded, truncated, relevance-selected slice, and
+  every answer reports how much left the server. Tests assert the
+  *negative*: unrelated mail and other identities' data are absent from the
+  outbound payload. See SECURITY.md § AI Assistant Privacy.
+- **19 — Negotiated importance filtering.** Built to ROADMAP.md's
+  constraints rather than to what was simplest: priorities are a separate
+  annotation and never a filter; every call is explained; the classifier is
+  a transparent heuristic *so that* the explanation is real; a user's
+  stated rule beats the guess, and a per-message override survives
+  re-classification.
+
+**Review fixes, 2026-08-13.** A review caught five real defects in these
+three sessions, all now fixed with regression tests:
+
+- **Importance classification only ever saw the newest 100 messages** — the
+  same capped-window mistake contact derivation made and had to be
+  corrected for. An older owned message could never be classified, and
+  overriding it returned a misleading 404 for mail the user can plainly
+  see. Classification now runs over the whole mailbox (keyset-batched), and
+  the override does a direct identity-scoped lookup.
+- **Priority rules didn't validate their targets**, so a rule could name a
+  nonexistent or foreign source and silently never match — the user
+  believes they tuned something and nothing changes, which is precisely the
+  un-negotiated behaviour this feature exists to avoid.
+- **Assistant provider errors were logged whole.** An SDK error carries
+  request/response metadata, and this request's body is the person's
+  retrieved inbox. Now only class, status, and the provider request id.
+- **An invalid `dueAt` silently became "no due date"** with a 201 — the
+  user sets a deadline and never hears about it again. Now a 400.
+- **The model is configurable** via `ANTHROPIC_MODEL`.
+
+One review finding was factually wrong and is recorded so it isn't
+re-litigated: it claimed `claude-opus-5` is not a valid identifier and
+suggested `claude-opus-4-20250514`. The installed `@anthropic-ai/sdk`
+(0.116.0) contains `claude-opus-5` in its model union and does **not**
+contain that suggestion; the Opus 4 series is the deprecated one.
+
+**The UI now exists (the review was right that it didn't).** Sessions
+17b–19 were backend-only, which made "cadence complete" premature. Added:
+`/calendar` (events + reminder create/complete/delete), `/assistant` (with
+the `contextSent` disclosure actually rendered — an API field nobody
+displays is not a disclosure), and importance controls in the inbox
+showing each priority with its reason plus both overrides the roadmap
+requires. 26 web tests, up from 16.
+
+219 tests (193 API + 26 web), workspace typecheck, and production build all
+pass. **Still not verified:** no real Anthropic API key has been used — the
+assistant is covered by a fake client only, so "it will work once the key
+is set" remains a claim, not a demonstration — and real-browser
+click-through of the new pages is pending. **Phase 2 is not re-baselined
+yet**, and that is the next session's first task.
+
+Previously — **Session 17 done**: contact cards, the fifth
+slice of **Phase 1: Communications Hub**. A new `contacts` table holds one
+row per person an identity has corresponded with, unified across connected
+sources and keyed on the lowercased email address. It is a **derived read
+model, not an address book**: every column is recomputed from `messages`
+by `comms/contacts-service.ts`, so it can be rebuilt from scratch at any
+time — user-authored fields (notes, preferred names, manual merges), if
+they ever arrive, belong in a separate table so a rebuild can't overwrite
+them. Derivation unifies a person across sender/recipient roles and letter
+case, counts one interaction per message, keeps first/last-seen honest
+regardless of input order, prefers the most recently seen display name,
+and excludes the identity's *own* verified mailbox addresses so you are
+never your own top contact. Three bearer-protected routes (`GET
+/identity/contacts`, `POST /identity/contacts/rebuild`, `GET
+/identity/contacts/:contactId`) plus a protected `/contacts` page with
+searchable cards and a detail panel listing that person's recent messages;
+the inbox's sync now refreshes contacts, and a failure there cannot fail
+the sync. Rebuild is transactional and identity-scoped, so one identity's
+rebuild can never delete another's rows — covered by a test.
+
+**A real bug in session 16 was found and fixed on the way**, and it is the
+kind only a click-through or a realistic fixture catches: the inbox parsed
+`messages.participants` as a flat array while the Gmail sync writes an
+`{from, to}` envelope, so `.map` threw and the catch rendered **every real
+synced message as "Unknown sender"**. Session 16's test passed because its
+fixture used `participants: null`. The fix is structural rather than local
+— `parseMessageParticipants` now lives in `@ident/shared` and both sides
+call it — with a regression test using the exact shape the sync writes.
+This is a concrete argument for the still-pending real-browser
+click-through, not an argument that it is now unnecessary.
+
+**Code review addressed, 2026-08-13.** The review caught a real design
+error in this session's own work:
+
+- **Contacts were derived from the inbox's newest-100 window, then used to
+  replace the entire contact set.** Past ~100 messages that silently
+  deleted anyone who hadn't emailed recently, and made `messageCount` and
+  `firstSeenAt` drift further from the truth on every rebuild as the
+  window advanced. A contact list is a claim about the *whole* mailbox, so
+  it now derives from a dedicated identity-scoped query over all messages
+  (keyset-batched on `(occurredAt, id)`, selecting only the two columns
+  derivation needs, with a 50k safety ceiling). The detail route had the
+  same flaw — it post-filtered the global newest-100, so a contact whose
+  mail was older showed *no* messages — and now queries by participant in
+  the database, with the `ILIKE` treated as a prefilter and an exact
+  participant check still applied before anything is returned.
+- **A failed contact rebuild after sync was swallowed entirely**, so the
+  UI reported complete success while contacts were stale. The sync is
+  still not failed by it (the messages really did save), but the status
+  now says so and points at the Contacts page.
+
+169 tests (153 API + 16 web), including a regression test that buries an
+old contact under 120 newer messages and asserts it survives a rebuild
+with accurate counts.
+
+**Real-browser click-through done, 2026-08-13** — and it earned its keep by
+finding two more bugs neither the test suite nor typecheck could see:
+
+1. **The API would not boot on a clean checkout.** `.env.example` ships
+   `COMMS_TOKEN_ENCRYPTION_KEY=` blank, so DEVELOPMENT.md's own documented
+   `cp .env.example .env` made dotenv define it as `""`. `??` treats an
+   empty string as configured, it decoded to zero bytes, and
+   `token-encryption.ts` threw at import time. Now `?.trim() ||`, so blank
+   means unset; 4 regression tests cover unset/blank/whitespace/real-key.
+   Exactly the same *class* of bug as item 2.5's dotenv-path fix — env
+   silently wrong, invisible until something actually runs.
+2. **Every message row and contact card rendered as an unreadable dark
+   green pill.** `.shell button` (class+element, 0,1,1) outranks a bare
+   `.message`/`.card` (0,1,0), so the pill style won over the intended
+   white card — putting `#66736c` meta text on `#315c48` at roughly 1.5:1
+   contrast. Both stylesheets now scope those rules with `.shell`.
+
+Verified working in the browser: registration → `/account`; `/inbox`
+listing newest-first with correct **sender names** (the participants fix
+confirmed live — every row would have read "Unknown sender" before it),
+unread badges, search filtering, and message bodies rendering a literal
+`<script>` tag as inert text; `/contacts` empty state, rebuild ("Rebuilt
+from 4 messages: 3 contacts"), cross-case + multi-name unification of one
+person into a single card with the correct first-seen date, own-address
+exclusion, singular/plural counts, detail panel listing only that person's
+messages, and search. All API calls returned 200/204.
+
+**Not verified, deliberately:** the Gmail OAuth leg was not re-run — that
+needs Omar's real Google credentials, and it was already browser-verified
+in item 2.5. The connected source and messages were seeded directly into
+the database using the exact `{from,to}` participants envelope
+`gmail-sync-service.ts` writes, so everything downstream of the connector
+is genuinely exercised; the connector itself is not re-claimed here.
+
+165 tests (151 API + 14 web), workspace typecheck, and production build all
+pass. Two pre-existing unrelated flakes under parallel load, both passing
+in isolation and both predating this session: `identity/password.test.ts`
+and `identity/routes.test.ts`'s recovery-regeneration case (argon2 is
+CPU-bound and can exceed the 5s timeout).
+
+Previously, 2026-08-13 — **Session 16 done**: the protected unified inbox,
 the fourth slice of **Phase 1: Communications Hub**. The new `/inbox` page
 lists connected Gmail sources, starts OAuth when none exist, triggers the
 existing on-demand sync, searches the normalized identity-scoped message
@@ -1221,6 +1482,18 @@ here. Re-check `npm audit` when drizzle-kit cuts a new release.
   browsers/authenticators that don't support PRF at all (the
   `PRF_UNSUPPORTED_PLACEHOLDER` fallback path is implemented but has not
   been observed firing against a real non-PRF authenticator).
+- **The notification ingest endpoint still leaks token liveness through
+  timing.** Objective 0's review question — "is there any remaining way for
+  a caller to distinguish a live token from a dead one?" — turned out to
+  have two answers. The first was a real, wire-reachable oracle and is
+  fixed (see below). The second is not fixed: a dead token costs one
+  indexed hash lookup and returns, while a live one costs a source upsert
+  and a message upsert, so response time separates them. Enumeration is
+  still hopeless against 144 bits; the exposure is that someone holding a
+  *leaked* token can confirm it is live, which is the same threat the
+  uniform 202 was written for. Closing it means making both paths do
+  comparable work, or accepting it explicitly — decide before this endpoint
+  is reachable from the public internet, not after.
 - CI logs a deprecation warning (not a failure) that `actions/checkout@v4`
   and `actions/setup-node@v4` target Node 20, which GitHub is forcing onto
   Node 24 runners in the meantime. Bump both actions to their Node
@@ -1407,21 +1680,56 @@ UI before intelligence, mirroring how Phase 0B itself was built
    automated test harness. Automated checks are green; real-browser inbox
    click-through remains pending and is not claimed.
 
-5. **Contact cards.** Unify contacts surfaced by connected sources into
-   one record per person — not calling/communications routing yet (that's
-   Phase 2+/Phase 10), just a unified read model.
+5. ~~**Contact cards.**~~ — done in session 17 (see this file's header):
+   the `contacts` table, `comms/contacts-service.ts` derivation,
+   `comms/contacts-store.ts`, three identity-scoped routes, and a
+   protected `/contacts` page. Kept to "just a unified read model" as
+   scoped — no calling/routing, and nothing user-editable yet. Also fixed
+   a real session-16 participants-parsing bug found while building this
+   (see header). **Open:** contact identity is one row per email address,
+   so the same human reached at two addresses is still two cards —
+   merging needs a user-authored layer, which is deliberately not part of
+   a derived read model. Revisit when there's a reason to let users edit
+   contacts.
 
-6. **Calendar + reminders.** Likely a second OAuth scope on the same
-   Gmail/Google connection from Session 2 (Google Calendar), or a second
-   provider — decide when this session starts, informed by whichever
-   provider Session 2 actually picked.
+6. ~~**Calendar + reminders.**~~ — done in session 17b. Decided as asked
+   when the session started: **a second scope on the existing Google
+   connection**, not a second provider — one consent screen, one token to
+   refresh, one disconnect. The cost, stated plainly: a source connected
+   before this session has Gmail scope only, so the granted scope is
+   checked at read time (`hasCalendarScope`) and a stale grant gets an
+   explicit reconnect prompt rather than an opaque 403. `calendar_events`
+   mirrors `messages` and preserves Google's all-day/timed distinction;
+   reminders are user-authored, so unlike contacts they are a system of
+   record nothing rebuilds.
 
-7. **Basic AI assistant (paid tier, the monetization wedge — see
-   BOOTSTRAP.md).** Read-only Q&A over the user's own inbox/calendar/
-   contacts. **Needs Omar**: which LLM provider/API — not decided
-   anywhere in this repo yet, don't default to one silently.
+7. ~~**Basic AI assistant (paid tier, the monetization wedge).**~~ — done
+   in session 18. **Provider decided with Omar (2026-08-13): Anthropic's
+   Claude API** (`claude-opus-5`) — chosen because its business-API terms
+   don't train on inputs by default, which is the weakest link in an
+   assistant over someone's inbox, not because of raw capability. Egress
+   posture also decided with Omar: **send only what's needed, and disclose
+   it**, enforced in `assistant/assistant-retrieval.ts` rather than in
+   policy — at most 12 messages / 10 events / 10 contacts / 10 reminders,
+   each truncated, chosen by relevance. Tests assert the *negative*: that
+   unrelated mail and other identities' data are absent from the outbound
+   payload. Retrieved mail is treated as untrusted input, and the
+   structural protection is that no code path leads from a model response
+   back into the database. See SECURITY.md § AI Assistant Privacy.
 
-8. **AI-assisted importance filtering (paid).** The most design-heavy
+8. ~~**AI-assisted importance filtering (paid).**~~ — done in session 19,
+   built directly against ROADMAP.md's constraints. Priorities are a
+   **separate annotation on their own endpoint, never a filter** over the
+   message list — a client that ignores the feature sees every message
+   unchanged, which is asserted by test. Every call carries a
+   human-readable reason, and the classifier is a **transparent heuristic
+   rather than a model call** precisely so that reason is real rather than
+   "the model said so". Precedence encodes the roadmap's own rule: the
+   heuristic proposes, a user's per-contact or per-source rule overrides
+   it, and an explicit per-message override survives re-classification.
+   Original scope follows.
+
+   **AI-assisted importance filtering (paid).** The most design-heavy
    item in Phase 1's ROADMAP.md entry — re-read that entry's constraints
    before starting: negotiated not silent, nothing auto-hidden or
    auto-deleted, per-source/contact tunable, defers to the user's stated
@@ -1440,6 +1748,243 @@ revised once mid-flight.
 elevation is enforced" burden instead. Not urgent, not part of the Phase 1
 sequence above — do it alongside whichever Phase 3+ slice adds the first
 real High/Critical route.
+
+## Objective 0 — land the review stack (BLOCKS EVERYTHING BELOW)
+
+**This is the first thing to work on. Nothing else starts until it is
+done.** Five PRs are open and `main` is twenty-five commits behind — the
+entire Communications Hub exists only in branches. Nothing here is finished
+while that is true, and a five-deep stack gets harder to land the longer it
+waits.
+
+Needs Omar's review; needs no accounts, no credentials, and no
+infrastructure.
+
+### Merge in order — each is based on its predecessor, not on `main`
+
+| PR | Focus of review | Est. |
+| --- | --- | --- |
+| [#1](https://github.com/OmarMoawad/IDent/pull/1) — unified inbox | Identity-scoped queries and the tenant-isolation pattern the rest builds on | ~10 min |
+| [#2](https://github.com/OmarMoawad/IDent/pull/2) — contact cards | Derivation over the whole mailbox, and why it replaces the set rather than merging | ~10 min |
+| [#3](https://github.com/OmarMoawad/IDent/pull/3) — calendar, assistant, importance | **Largest diff.** `assistant-retrieval.ts` *is* the privacy boundary — anything it does not return cannot reach a provider. Worth reading in full | ~30 min |
+| [#4](https://github.com/OmarMoawad/IDent/pull/4) — notifications | **Security-relevant.** Token hashing, the log-redaction serializer, and the uniform-202 ingest response. The question worth answering: is there any remaining way for a caller to distinguish a live token from a dead one? | ~20 min |
+| [#5](https://github.com/OmarMoawad/IDent/pull/5) — provider layer + local mode | The egress classification and whether the disclosure it drives is one you would stand behind publicly | ~15 min |
+
+Merging out of order will create conflicts, because each branch is based on
+the one before it rather than on `main`.
+
+### If review time is short
+
+Prioritise **#4** and **#3** — those carry the security-relevant changes.
+The others are feature work with narrower blast radius.
+
+### Done when
+
+- All five are merged and `main` contains them
+- CI is green **on `main`**, not only on the branches
+- The merged `agent/*` branches and their worktrees are deleted
+- `docs/progress.svg` regenerated from `main`
+
+## Sessions 22–24 — foundation before features (after Objective 0)
+
+Inserted ahead of the Phase 2 cadence below on CTO review, 2026-08-13. The
+instruction was explicit: **pause new surface area until one
+production-like vertical slice is exercised.** Phase 2's eight sessions do
+not start until sessions 22 and 23 are done, and session 24 is a hard
+prerequisite for Phase 2's own session 5.
+
+The reasoning: this repo has accumulated 266 tests across ten sessions with
+no production-like environment and no real OAuth integration. Every
+external dependency is exercised against a fake. Building further on that
+compounds risk.
+
+### Session 22 — evidence and claims discipline (no accounts needed)
+
+Start here; none of it is blocked.
+
+1. **Real-browser click-through of the four new pages.** `/calendar`,
+   `/assistant`, the inbox importance controls and notifications have never
+   been opened in a browser. The two previous click-throughs each found
+   bugs a passing suite had missed — unreadable cards, and a button that
+   was never rendered at all. Expected yield here is high, and the
+   assistant now runs locally so it can be exercised against a real model.
+2. **Replace binary "proven" with scoped evidence,** throughout this file
+   and the README. The form the CTO asked for: *"exercised end to end on
+   one M1 development configuration against `llama3.2:3b`, three
+   live-provider tests, at commit `d045a7b`"* — not "proven end-to-end".
+   Also attach durable links (CI run, PR, SHA, timestamp) to every status
+   or numeric claim.
+3. **Define an explicit egress classification policy.** `isLoopbackUrl` is
+   too coarse for the guarantee the UI makes. Classify into named tiers and
+   surface the tier, not a boolean:
+   - same process / Unix socket
+   - loopback
+   - same machine via a non-loopback interface
+   - private LAN or VPN / private overlay
+   - public internet
+
+   A LAN endpoint **is** egress from the user's machine even though it is
+   not public-internet egress, and today it is reported as such only by
+   accident of the hostname check. Specify behaviour for hostnames
+   resolving to several addresses, redirects, proxies, and DNS rebinding.
+4. **Change the local-mode disclosure from absence to assertion.** Hiding
+   the third-party warning was right; showing *nothing* is not. State
+   positively where processing happens — "Processed locally at
+   `http://localhost:11434`" — so the claim is verifiable rather than
+   merely absent.
+5. **Publish a reproducible benchmark method** and rerun under it. The
+   current 39 s / 4.1 s figures are a single cold run of a three-token
+   reply, which is not a capacity benchmark. Record: hardware and total
+   unified memory; macOS and Ollama versions; model digest and
+   quantization; the prompt and expected answer; context size and sampling
+   settings; cold-start versus warm timings; prompt-eval and generation
+   durations separately; tokens/second; the timeout used; and several runs
+   with median and range. Ollama returns timing fields — use them rather
+   than inferring cause from wall-clock.
+6. **Correct the terminology.** Apple Silicon has **unified memory**, not
+   VRAM (this machine: 8 GB total, ~5.3 GiB reported available to the
+   runtime). Local inference has **no per-request provider charge** — it is
+   not "zero marginal cost", which ignores power, hardware and support.
+   OpenAI compatibility is **endpoint-specific and version-dependent**
+   across Ollama, vLLM and llama.cpp — not one identical wire format — so
+   each backend needs its own verification rather than an assumption of
+   equivalence.
+7. **Stop asserting that 93% memory occupancy caused the latency.** It is a
+   plausible inference, not a measured fact. Either demonstrate it with
+   Ollama's timing fields or state it as a hypothesis.
+
+### Session 23 — one production-like vertical slice (needs Omar's accounts)
+
+Same bar as Receiptless's session 10. All of these, not a subset: real
+identity and OAuth (a genuine Google account, not a fake client); secret
+management with nothing in the repo or build logs; observability (error
+tracking and a log drain); a rollback procedure documented *and rehearsed*;
+readiness checks exercised against the real database; and a migration
+procedure run as a release step.
+
+The slice: connect a real Google account → sync real mail and calendar →
+they appear in the unified inbox → the assistant answers a grounded
+question about them. IDent has no hosting plan at all yet, so that decision
+comes first.
+
+### Session 24 — write-action threat model and design review (before Phase 2 session 5)
+
+Design only. No implementation until this is reviewed.
+
+Today the assistant's protection against prompt injection is structural:
+no code path leads from a model response back into the database. Phase 2
+session 5 removes that, and the earlier plan — "pending action plus a
+separate authenticated request" — is a starting point the CTO correctly
+judged insufficient. A separate endpoint alone does not stop the model
+from shaping the payload the user believes they are confirming.
+
+The design must specify, and the threat model must justify:
+
+- **Server-generated, immutable action payloads** — the model proposes
+  intent; the server constructs what actually executes
+- **User and tenant binding** on every pending action
+- **Expiry and one-time execution**
+- **Idempotency**
+- **Step-up authentication** for sensitive actions (this repo already has
+  elevation — reuse it)
+- **Authorization and target-state revalidation at execution time**, not
+  only at creation
+- **A human-readable preview generated independently of model prose**, so
+  the confirmation shows what will happen rather than what the model says
+  will happen
+- **Defence against hidden or ambiguous parameters** injected into the
+  action
+- **Audit logging** of proposal, confirmation and execution
+
+Write the injection test first: a message whose body asks the assistant to
+send mail must, at most, produce a pending action a human has to approve.
+
+## Session cadence for Phase 2 — re-baselined 2026-08-13
+
+Phase 2 is "Productivity & Real-Time Comms" (ROADMAP.md), and its exit
+criteria is narrower than its bullet list: *"IDent can replace day-to-day
+switching between chat, calendar, and drive apps for non-sensitive
+workflows."* Chat, calendar, drive. Video and voice are listed in the
+phase but are not what the exit criteria measures, so they sit at the tail
+where a delay doesn't block the phase from being usable.
+
+Ordered so the first session is fully unblocked and each later one has a
+reason to come after the one before it.
+
+1. **Connector abstraction — do this first, before any new provider.**
+   The OAuth lifecycle is currently Gmail-shaped: `gmail-service.ts`
+   owns connect/refresh/disconnect, and `google-oauth-client.ts` hardcodes
+   Google's endpoints and scopes. `connected_sources` is already generic,
+   so the table is fine — the *flow* is not. Adding Slack and Notion
+   before extracting a provider registry means writing the state/PKCE/
+   token-refresh dance three times and fixing every future bug three
+   times. No new user-facing behaviour; the test for success is that the
+   Gmail connector still passes its existing suite unchanged after moving
+   behind the new interface. Fully buildable solo.
+
+2. **Slack integration.** Messages and notifications into the unified
+   inbox, reusing session 20's `kind` discriminator rather than inventing
+   a third shape. **Needs Omar**: a Slack app (api.slack.com/apps) and its
+   OAuth client id/secret. Scope should be read-only to start, matching
+   the Gmail precedent — `channels:history`, `users:read`, nothing that
+   can post.
+
+3. **Notion integration.** Pages and updates as searchable content. Notion
+   is a different shape from mail — documents, not a stream — so the open
+   question this session must answer is whether pages belong in `messages`
+   at all or need their own table. Resist the reflex to reuse `messages`
+   just because session 20 did: a notification genuinely *is* a message-
+   shaped event, and a wiki page is not. **Needs Omar**: a Notion internal
+   integration token.
+
+4. **Drive aggregation (read + search).** Google Drive first, since the
+   Google connection already exists and this is one more scope on it —
+   the same second-scope pattern session 17b established for Calendar,
+   including the stale-grant reconnect prompt. Search across connected
+   drives is the actual deliverable; a file list is not. **Needs Omar**:
+   adding `drive.readonly` to the existing OAuth client's consent screen.
+
+5. **Assistant write actions, with per-action confirmation.** The
+   highest-risk session in the phase, and the reason it comes after the
+   connectors rather than before: today the assistant's structural
+   protection against prompt injection is that **no code path leads from a
+   model response back into the database** (see SECURITY.md). This session
+   deliberately removes that protection, so the confirmation gate replaces
+   it and must be real — *server-enforced*, with the action persisted as
+   pending and executed only on a separate authenticated request from the
+   user. A UI-only confirmation is not a control; it is a dialog box in
+   front of an open door. Write the injection test first: a message whose
+   body asks the assistant to send mail must produce, at most, a pending
+   action the user has to approve. The confirmation architecture is
+   buildable and testable solo with a fake; **needs Omar** only for the
+   send scope on the Google client when it comes time to actually deliver.
+
+6. **Personal storage node.** ROADMAP.md is careful here and so should
+   this session be: a sync app for the user's *own* hardware acting as a
+   personal node, explicitly **not** unlimited free cloud storage (see
+   SECURITY.md for why that promise doesn't hold). The design question to
+   settle before writing code is what happens when the node is offline,
+   because that answer determines whether this is a sync protocol or a
+   cache.
+
+7. **Video calls.** **Needs Omar**: a provider decision with real cost
+   implications — self-hosted WebRTC (cheapest per-minute, most operational
+   work, TURN servers to run) versus a hosted SFU such as LiveKit or Daily
+   (fast to ship, per-participant-minute billing that scales with success).
+   Do not default to one silently; this is the same class of decision as
+   session 18's LLM provider.
+
+8. **Voice calling across carrier/VoIP channels.** The heaviest item in
+   the phase and correctly last. **Needs Omar**: a carrier/VoIP provider,
+   and — unlike everything above — genuine regulatory homework (number
+   provisioning, emergency-calling obligations, per-jurisdiction rules).
+   BOOTSTRAP.md's "what isn't zero-capital" section already flags
+   regulatory cost as the thing AI-assisted development doesn't remove.
+   Phase 2's exit criteria does not depend on this session, so it can slip
+   without blocking the phase.
+
+**Nothing here is blocked from starting**: session 1 needs no accounts at
+all, and it is the session that makes 2, 3 and 4 cheap.
 
 ## Deployment instructions
 

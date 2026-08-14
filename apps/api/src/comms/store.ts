@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, ilike, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { connectedSources, messages, oauthStateChallenges } from "../db/schema.js";
 
@@ -62,6 +62,42 @@ export async function findConnectedSourcesByIdentity(identityId: string): Promis
  * creating a redundant duplicate — see gmail-service.ts's
  * completeGmailConnection.
  */
+/**
+ * Atomic get-or-create, keyed on the same
+ * (identityId, provider, providerAccountId) uniqueness the schema already
+ * declares. `insertConnectedSource` plus a prior lookup is a read-then-write
+ * race: two concurrent first-time deliveries both see nothing and both
+ * insert. That race is not theoretical for the notification pseudo-source,
+ * where the two requests arrive from the same third-party service at once.
+ *
+ * Requires a **non-null** providerAccountId — Postgres treats NULLs as
+ * distinct in a UNIQUE constraint, so a null here would let duplicates
+ * through even with the conflict target set.
+ */
+export async function getOrCreateConnectedSource(input: {
+  identityId: string;
+  provider: string;
+  providerAccountId: string;
+  status?: string;
+}): Promise<ConnectedSource> {
+  const [row] = await db
+    .insert(connectedSources)
+    .values({
+      identityId: input.identityId,
+      provider: input.provider,
+      providerAccountId: input.providerAccountId,
+      status: input.status ?? "connected",
+    })
+    .onConflictDoUpdate({
+      target: [connectedSources.identityId, connectedSources.provider, connectedSources.providerAccountId],
+      // A no-op update rather than DoNothing: DoNothing returns no row on
+      // conflict, which would leave the loser of the race with nothing.
+      set: { updatedAt: new Date() },
+    })
+    .returning(connectedSourceColumns);
+  return row;
+}
+
 export async function findConnectedSourceByProviderAccount(
   identityId: string,
   provider: string,
@@ -81,16 +117,35 @@ export async function findConnectedSourceByProviderAccount(
   return rows[0] ?? null;
 }
 
+const messageColumns = {
+  id: messages.id,
+  identityId: messages.identityId,
+  sourceId: messages.sourceId,
+  externalId: messages.externalId,
+  subject: messages.subject,
+  snippet: messages.snippet,
+  body: messages.body,
+  participants: messages.participants,
+  occurredAt: messages.occurredAt,
+  isRead: messages.isRead,
+  kind: messages.kind,
+  actionUrl: messages.actionUrl,
+  createdAt: messages.createdAt,
+};
+
 export type NewMessage = {
   identityId: string;
   sourceId: string;
   externalId: string;
-  subject?: string;
-  snippet?: string;
-  body?: string;
+  subject?: string | null;
+  snippet?: string | null;
+  body?: string | null;
   participants?: string;
   occurredAt: Date;
   isRead?: boolean;
+  /** "message" (default) | "notification" — see the schema comment. */
+  kind?: string;
+  actionUrl?: string | null;
 };
 
 export type Message = {
@@ -104,6 +159,8 @@ export type Message = {
   participants: string | null;
   occurredAt: Date;
   isRead: boolean;
+  kind: string;
+  actionUrl: string | null;
   createdAt: Date;
 };
 
@@ -129,6 +186,8 @@ export async function upsertMessage(input: NewMessage): Promise<Message> {
       participants: input.participants,
       occurredAt: input.occurredAt,
       isRead: input.isRead ?? false,
+      kind: input.kind ?? "message",
+      actionUrl: input.actionUrl ?? null,
     })
     .onConflictDoUpdate({
       target: [messages.sourceId, messages.externalId],
@@ -138,21 +197,11 @@ export async function upsertMessage(input: NewMessage): Promise<Message> {
         body: input.body,
         participants: input.participants,
         occurredAt: input.occurredAt,
+        kind: input.kind ?? "message",
+        actionUrl: input.actionUrl ?? null,
       },
     })
-    .returning({
-      id: messages.id,
-      identityId: messages.identityId,
-      sourceId: messages.sourceId,
-      externalId: messages.externalId,
-      subject: messages.subject,
-      snippet: messages.snippet,
-      body: messages.body,
-      participants: messages.participants,
-      occurredAt: messages.occurredAt,
-      isRead: messages.isRead,
-      createdAt: messages.createdAt,
-    });
+    .returning(messageColumns);
   return row;
 }
 
@@ -164,7 +213,7 @@ export async function upsertMessage(input: NewMessage): Promise<Message> {
  */
 export async function findMessagesByIdentity(
   identityId: string,
-  options: { query?: string; limit?: number } = {},
+  options: { query?: string; limit?: number; kind?: string } = {},
 ): Promise<Message[]> {
   const query = options.query?.trim();
   const limit = Math.max(1, Math.min(options.limit ?? 100, 100));
@@ -176,22 +225,16 @@ export async function findMessagesByIdentity(
         ilike(messages.participants, `%${query}%`),
       )
     : undefined;
+  // The unified inbox lists both kinds by default — that is the whole
+  // point of it. `kind` narrows to one segment when the user asks.
+  const filters = [eq(messages.identityId, identityId)];
+  if (search) filters.push(search);
+  if (options.kind) filters.push(eq(messages.kind, options.kind));
+
   return db
-    .select({
-      id: messages.id,
-      identityId: messages.identityId,
-      sourceId: messages.sourceId,
-      externalId: messages.externalId,
-      subject: messages.subject,
-      snippet: messages.snippet,
-      body: messages.body,
-      participants: messages.participants,
-      occurredAt: messages.occurredAt,
-      isRead: messages.isRead,
-      createdAt: messages.createdAt,
-    })
+    .select(messageColumns)
     .from(messages)
-    .where(search ? and(eq(messages.identityId, identityId), search) : eq(messages.identityId, identityId))
+    .where(and(...filters))
     .orderBy(desc(messages.occurredAt))
     .limit(limit);
 }
@@ -204,19 +247,7 @@ export async function findMessagesByIdentity(
  */
 export async function findMessageByIdForIdentity(id: string, identityId: string): Promise<Message | null> {
   const rows = await db
-    .select({
-      id: messages.id,
-      identityId: messages.identityId,
-      sourceId: messages.sourceId,
-      externalId: messages.externalId,
-      subject: messages.subject,
-      snippet: messages.snippet,
-      body: messages.body,
-      participants: messages.participants,
-      occurredAt: messages.occurredAt,
-      isRead: messages.isRead,
-      createdAt: messages.createdAt,
-    })
+    .select(messageColumns)
     .from(messages)
     .where(and(eq(messages.id, id), eq(messages.identityId, identityId)))
     .limit(1);
@@ -326,4 +357,47 @@ export async function consumeOauthStateChallenge(state: string): Promise<Consume
 
     return { identityId: pending.identityId, provider: pending.provider, pkceVerifier: pending.pkceVerifier };
   });
+}
+
+const CLASSIFY_BATCH_SIZE = 500;
+/** Matches contacts-store.ts's ceiling; see the note there. */
+const MAX_CLASSIFY_MESSAGES = 50_000;
+
+/**
+ * Every message for an identity, oldest-first, for whole-mailbox passes.
+ *
+ * Deliberately separate from findMessagesByIdentity, which caps at 100 for
+ * the inbox read path. Importance classification used that capped query
+ * and therefore silently ignored everything older than the newest 100 —
+ * the same mistake contact derivation made and had to be corrected for.
+ * Keyset-batched on (occurredAt, id) so it is stable under concurrent
+ * inserts.
+ */
+export async function findAllMessagesByIdentity(identityId: string): Promise<Message[]> {
+  const rows: Message[] = [];
+  let cursor: { occurredAt: Date; id: string } | null = null;
+
+  while (rows.length < MAX_CLASSIFY_MESSAGES) {
+    const page: Message[] = await db
+      .select(messageColumns)
+      .from(messages)
+      .where(
+        cursor
+          ? and(
+              eq(messages.identityId, identityId),
+              sql`(${messages.occurredAt}, ${messages.id}) > (${cursor.occurredAt}, ${cursor.id})`,
+            )
+          : eq(messages.identityId, identityId),
+      )
+      .orderBy(asc(messages.occurredAt), asc(messages.id))
+      .limit(CLASSIFY_BATCH_SIZE);
+
+    if (page.length === 0) break;
+    rows.push(...page);
+    if (page.length < CLASSIFY_BATCH_SIZE) break;
+    const last = page[page.length - 1];
+    cursor = { occurredAt: last.occurredAt, id: last.id };
+  }
+
+  return rows;
 }

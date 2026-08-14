@@ -14,6 +14,36 @@ export const GOOGLE_OAUTH_REDIRECT_URI =
 // broad grant "in case it's useful later."
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
+// Session 17b: Google Calendar, requested on the *same* Google connection
+// rather than as a second provider — decided when this session started, as
+// the cadence entry asked. One consent screen, one token to refresh, one
+// disconnect that revokes both; a second connection to the same account
+// would double all three for no user-visible benefit.
+//
+// The cost of that choice, stated plainly: adding a scope invalidates
+// existing grants, so a source connected before this session has Gmail
+// access only and must be reconnected to gain calendar access. That is why
+// the granted scope is checked at read time (see hasCalendarScope) instead
+// of being assumed from the connection existing.
+export const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+
+/** Everything the connect flow asks for, space-separated as Google expects. */
+export const GOOGLE_OAUTH_SCOPES = [GMAIL_SCOPE, GOOGLE_CALENDAR_SCOPE].join(" ");
+
+/**
+ * Whether a stored grant actually includes calendar access. Google returns
+ * the granted scopes on the token response, and a user can decline
+ * individual scopes on the consent screen, so this must be checked rather
+ * than inferred.
+ */
+export function hasCalendarScope(grantedScope: string | null | undefined): boolean {
+  return (grantedScope ?? "").split(/\s+/).includes(GOOGLE_CALENDAR_SCOPE);
+}
+
+// How many events one on-demand calendar sync pulls, same bounded
+// user-triggered shape as GMAIL_SYNC_MAX_MESSAGES.
+export const CALENDAR_SYNC_MAX_EVENTS = 50;
+
 // How long an OAuth state challenge stays valid — long enough to get
 // through Google's consent screen, short enough that an abandoned flow's
 // state can't be replayed hours later.
@@ -42,6 +72,16 @@ export const GMAIL_SYNC_MAX_MESSAGES = 25;
  * yet" assumption everything else in local dev already relies on. Set
  * COMMS_TOKEN_ENCRYPTION_KEY to a real per-environment key (base64,
  * 32 bytes) before that gate is ever lifted.
+ *
+ * `??` is deliberately not used here: .env.example ships this key blank
+ * (`COMMS_TOKEN_ENCRYPTION_KEY=`), so DEVELOPMENT.md's own documented
+ * setup step — `cp .env.example .env` — makes dotenv define it as an
+ * empty string. `?? ` treats that as "set", the empty string decodes to
+ * zero bytes, and token-encryption.ts throws at import time, so the API
+ * refused to boot on a clean checkout. Found by the session 17
+ * real-browser click-through; the same class of "env silently wrong,
+ * only visible when actually running it" bug as the dotenv-path fix in
+ * item 2.5. A blank value means "not configured", identical to unset.
  */
 export const COMMS_TOKEN_ENCRYPTION_KEY_BASE64 =
-  process.env.COMMS_TOKEN_ENCRYPTION_KEY ?? "lsA98LvDoz3c0P6DI7UUa6vYkD4Py7LzFhlPT7+787U=";
+  process.env.COMMS_TOKEN_ENCRYPTION_KEY?.trim() || "lsA98LvDoz3c0P6DI7UUa6vYkD4Py7LzFhlPT7+787U=";

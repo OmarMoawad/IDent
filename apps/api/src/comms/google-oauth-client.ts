@@ -1,5 +1,6 @@
 import {
   GMAIL_SCOPE,
+  GOOGLE_OAUTH_SCOPES,
   GOOGLE_OAUTH_CLIENT_ID,
   GOOGLE_OAUTH_CLIENT_SECRET,
   GOOGLE_OAUTH_REDIRECT_URI,
@@ -88,7 +89,7 @@ export class RealGoogleOAuthClient implements GoogleOAuthClient {
       client_id: GOOGLE_OAUTH_CLIENT_ID,
       redirect_uri: GOOGLE_OAUTH_REDIRECT_URI,
       response_type: "code",
-      scope: GMAIL_SCOPE,
+      scope: GOOGLE_OAUTH_SCOPES,
       // offline + consent together are what guarantee a refresh token
       // comes back — offline alone only guarantees one on a first-ever
       // consent, and this flow needs one every time a source is

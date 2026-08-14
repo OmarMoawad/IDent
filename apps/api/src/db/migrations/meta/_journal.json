@@ -78,6 +78,48 @@
       "when": 1786446080583,
       "tag": "0010_jazzy_violations",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786626966350,
+      "tag": "0011_military_slipstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786631140077,
+      "tag": "0012_whole_young_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786631677528,
+      "tag": "0013_loud_shaman",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786637498587,
+      "tag": "0014_left_photon",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786639239084,
+      "tag": "0015_add_notification_token_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786639257422,
+      "tag": "0016_drop_notification_plaintext_token",
+      "breakpoints": true
     }
   ]
 }

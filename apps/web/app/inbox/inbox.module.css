@@ -17,8 +17,14 @@
 .search input { flex: 1 1 15rem; border: 1px solid #8f9b94; border-radius: 999px; padding: .7rem 1rem; }
 .inbox { display: grid; gap: 1rem; }
 .list, .reader { min-width: 0; border: 1px solid #ccd4cd; border-radius: 14px; overflow: hidden; background: #fff; }
-.message { display: grid; width: 100%; gap: .35rem; border: 0; border-bottom: 1px solid #e4e7e3; border-radius: 0; padding: 1rem; background: white; color: #17211d; text-align: left; }
-.message:hover, .message[aria-pressed="true"] { background: #eaf2ed; }
+/* A message row is a <button> for keyboard/screen-reader access, but it must
+   not look like one. `.shell button` above is class+element (0,1,1), which
+   outranks a bare `.message` (0,1,0) — so the pill style won and every row
+   rendered as a dark green pill with #66736c meta text on #315c48 (~1.5:1
+   contrast, unreadable). Found in the session 17 real-browser click-through.
+   Prefixing with .shell matches that specificity and restores the card look. */
+.shell .message { display: grid; width: 100%; gap: .35rem; border: 0; border-bottom: 1px solid #e4e7e3; border-radius: 0; padding: 1rem; background: white; color: #17211d; text-align: left; }
+.shell .message:hover, .shell .message[aria-pressed="true"] { background: #eaf2ed; }
 .messageTop { display: flex; justify-content: space-between; gap: 1rem; }
 .unread { color: #9a4c11; font-size: .75rem; font-weight: 800; text-transform: uppercase; }
 .messageMeta { color: #66736c; font-size: .8rem; }

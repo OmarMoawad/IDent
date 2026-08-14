@@ -18,8 +18,8 @@ your keys once the session ends.
 > **Status: Phase 0 (Identity Core) done, Phase 1 (Communications Hub) in
 > progress.** Real username+password accounts, passkeys, recovery codes,
 > and step-up auth are all built and browser-verified; Phase 1's schema
-> foundation, real Gmail OAuth/sync, and the first protected unified inbox
-> UI are in. The
+> foundation, real Gmail OAuth/sync, the protected unified inbox UI, and
+> derived contact cards are in. The
 > progress bar above is regenerated after each session
 > (`scripts/generate-progress-svg.mjs`) — see
 > [IDent_STATE.md](IDent_STATE.md) for exactly what's done vs. pending in
@@ -70,3 +70,47 @@ that core mission, not instead of it.
 - **AI Assistant Layer** — cross-cutting assistant with scoped access to the above
 
 Full sequencing and rationale for this ordering is in [ROADMAP.md](ROADMAP.md).
+
+### Notifications (session 20)
+
+Notifications from third-party services land in the same unified inbox as
+mail, discriminated by `kind`.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /identity/notifications/endpoint` | Status only — never the token |
+| `POST /identity/notifications/endpoint` | Mint or rotate; returns the plaintext **once** |
+| `POST /notifications/ingest` | Where a service posts, token in the `x-ident-notification-token` header |
+| `POST /notifications/ingest/:token` | URL fallback for senders that cannot set headers; the path is redacted in logs |
+| `GET /identity/messages?kind=notification` | Segment the unified list |
+
+Only the sha256 hash of the token is stored, so a database dump yields no
+usable credential and a lost token can only be replaced, not recovered.
+`actionUrl` is validated to http/https at ingest — a `javascript:` URL
+rendered as a link is stored XSS.
+
+The ingest endpoint answers **202 to everything** — unknown token, valid
+delivery, malformed payload — so it cannot be used to test whether a token
+is live. Rejections are recorded against the endpoint for the owner to
+read, which is how a misconfigured sender stays debuggable without
+telling the sender anything.
+
+### Assistant providers (session 21)
+
+The assistant is provider-neutral. One OpenAI-compatible implementation
+covers Ollama, vLLM, llama.cpp's server, and the hosted OpenAI-compatible
+APIs; Anthropic has its own implementation because its wire shape differs
+(a refusal arrives as a normal 200 that must be checked before reading
+content).
+
+Run it fully locally — nothing leaves the machine:
+
+```bash
+ollama pull llama3.2:3b
+ASSISTANT_PROVIDER=local npm run dev:api
+```
+
+`GET /identity/assistant/status` reports `leavesMachine`, derived from the
+resolved base URL rather than the provider name, and the UI's disclosure
+follows it. With nothing configured the assistant is unavailable — it never
+falls back to a default that would ship data somewhere unchosen.

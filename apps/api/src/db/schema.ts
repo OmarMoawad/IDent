@@ -317,6 +317,22 @@ export const messages = pgTable(
     // yet (that's a later Phase 1 session, "Contact cards"); kept as an
     // opaque blob here rather than guessing at that table's eventual shape.
     participants: text("participants"),
+    /**
+     * "message" | "notification". The schema comment above always claimed
+     * this table was the unified message/notification shape; until session
+     * 20 only messages existed. Notifications share the table rather than
+     * getting their own because ROADMAP.md's Phase 1 promise is a single
+     * unified inbox — two tables would mean two lists to merge on read and
+     * two shapes for every downstream feature (search, priorities, the
+     * assistant) to learn.
+     */
+    kind: text("kind").notNull().default("message"),
+    /**
+     * Where a notification points ("view the pull request"). Validated to
+     * http/https on write — a `javascript:` URL rendered as a link is
+     * stored XSS, and this value comes from outside.
+     */
+    actionUrl: text("action_url"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     isRead: boolean("is_read").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -381,4 +397,222 @@ export const oauthStateChallenges = pgTable(
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
   },
   (table) => [uniqueIndex("oauth_state_challenges_state_idx").on(table.state)],
+);
+
+/**
+ * Phase 1 session 17 — Contact cards. One row per person an identity has
+ * actually corresponded with, unified across every connected source.
+ *
+ * Derived, not authored: every column here is recomputed from `messages`
+ * (see comms/contacts-service.ts), so this table is a materialized read
+ * model rather than a system of record. That is a deliberate choice over
+ * a user-editable address book — ROADMAP.md's Phase 1 entry scopes this
+ * session to "just a unified read model", and a derived table can be
+ * rebuilt from scratch at any time without losing anything a user typed.
+ * When user-authored fields (notes, a preferred name, merged duplicates)
+ * eventually arrive they belong in a *separate* table keyed to this one,
+ * so a rebuild can never overwrite them.
+ *
+ * Keyed on the lowercased email address (see shared's participantKey):
+ * the only stable cross-message identifier a mail source actually
+ * provides. Display names vary message to message ("J. Doe", "Jane Doe"),
+ * so the most recently seen non-empty one wins rather than the first.
+ */
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    // Lowercased; the unique index below is what makes "one row per
+    // person per identity" a database guarantee rather than a convention
+    // the derivation code has to remember.
+    address: text("address").notNull(),
+    displayName: text("display_name"),
+    messageCount: integer("message_count").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("contacts_identity_address_idx").on(table.identityId, table.address),
+    // Matches the list query's shape (WHERE identityId = ? ORDER BY
+    // lastSeenAt DESC) as a single index scan — most-recent contacts
+    // first is the default a contact list is actually read in.
+    index("contacts_identity_last_seen_idx").on(table.identityId, table.lastSeenAt),
+  ],
+);
+
+/**
+ * Phase 1 session 17b — Calendar. Events pulled from a connected Google
+ * Calendar, normalized the same "unify, don't replace" way messages are.
+ *
+ * Mirrors `messages` deliberately: identityId denormalized so per-identity
+ * queries are one indexed lookup, a (sourceId, externalId) unique index so
+ * re-syncing is idempotent, and the same composite foreign key tying
+ * sourceId and identityId together so a row can never belong to one
+ * identity while pointing at another's connected source.
+ */
+export const calendarEvents = pgTable(
+  "calendar_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    sourceId: uuid("source_id").notNull(),
+    externalId: text("external_id").notNull(),
+    title: text("title"),
+    description: text("description"),
+    location: text("location"),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    isAllDay: boolean("is_all_day").notNull().default(false),
+    // JSON-encoded Participant[] — same shape and shared parser as
+    // messages.participants (see @ident/shared).
+    attendees: text("attendees"),
+    status: text("status"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("calendar_events_source_external_id_idx").on(table.sourceId, table.externalId),
+    index("calendar_events_identity_starts_at_idx").on(table.identityId, table.startsAt),
+    foreignKey({
+      name: "calendar_events_source_identity_fk",
+      columns: [table.sourceId, table.identityId],
+      foreignColumns: [connectedSources.id, connectedSources.identityId],
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * User-authored reminders — the other half of the "calendar + reminders"
+ * session. Deliberately *not* derived from anything: unlike contacts,
+ * these are the user's own words, so they are a system of record and
+ * nothing may rebuild or overwrite them.
+ */
+export const reminders = pgTable(
+  "reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    notes: text("notes"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("reminders_identity_due_at_idx").on(table.identityId, table.dueAt)],
+);
+
+/**
+ * Phase 1 session 19 — AI-assisted importance filtering.
+ *
+ * ROADMAP.md's constraints on this feature are unusually specific, and the
+ * schema is shaped by them rather than by what would be simplest:
+ *
+ * - **Nothing is hidden or deleted.** This table annotates messages; it
+ *   never filters them. A "low" priority is a label the inbox can sort or
+ *   de-emphasize by, and the message stays in every listing.
+ * - **The user can see why.** `reason` is required — an unexplained
+ *   priority call is exactly the silent filtering the roadmap forbids.
+ * - **Provenance is explicit.** `assignedBy` distinguishes the
+ *   assistant's guess from the user's own override and from a rule the
+ *   user wrote, so the UI can show which is which and the user can
+ *   override any of the three.
+ */
+export const messagePriorities = pgTable(
+  "message_priorities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    // "high" | "normal" | "low" — deliberately coarse. A numeric score
+    // would invite a hidden threshold; three named bands stay explainable.
+    level: text("level").notNull(),
+    reason: text("reason").notNull(),
+    // "assistant" | "user" | "rule"
+    assignedBy: text("assigned_by").notNull(),
+    // Set when a rule produced this, so the UI can offer "change the rule"
+    // alongside "change this one" — the roadmap requires both.
+    ruleId: uuid("rule_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("message_priorities_message_idx").on(table.messageId),
+    index("message_priorities_identity_level_idx").on(table.identityId, table.level),
+  ],
+);
+
+/**
+ * A user-stated preference about what matters, per contact or per source.
+ * These are the "stated preferences" ROADMAP.md says the assistant must
+ * defer to when the two conflict — enforced in importance-service.ts by
+ * applying rules *after* the assistant's pass, overwriting it.
+ */
+export const priorityRules = pgTable(
+  "priority_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    // "contact" (match a participant address) | "source" (match a connected source)
+    matchType: text("match_type").notNull(),
+    matchValue: text("match_value").notNull(),
+    level: text("level").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("priority_rules_identity_match_idx").on(table.identityId, table.matchType, table.matchValue),
+    index("priority_rules_identity_idx").on(table.identityId),
+  ],
+);
+
+
+/**
+ * Phase 1 session 20 — notification ingestion.
+ *
+ * A per-identity opaque token that external services POST notifications
+ * to. Same shape as Receiptless's inbound forwarding address (that repo
+ * solved this first): the token *is* the credential, so it is high-entropy
+ * and opaque, and an unknown one is indistinguishable from a known one
+ * that produced nothing.
+ *
+ * Push rather than poll because that is how notifications actually arrive
+ * — a service tells you something happened. Nothing here schedules work.
+ */
+export const notificationEndpoints = pgTable(
+  "notification_endpoints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" })
+      .unique(),
+    /**
+     * Only the sha256 hash of the token is stored — the same rule the
+     * `sessions` table already applies to its bearer cookie. A database
+     * dump therefore yields no usable ingest credential, and the plaintext
+     * exists only in the single response that mints it.
+     */
+    tokenHash: text("token_hash").notNull().unique(),
+    /**
+     * Why the last delivery was rejected, if it was. The ingest endpoint
+     * answers 202 to everything (see notification-routes.ts) so that it
+     * cannot be used to test whether a token is real; this column is how
+     * the *owner* still gets to debug a misconfigured sender.
+     */
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
 );
