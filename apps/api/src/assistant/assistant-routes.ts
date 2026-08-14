@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { extractBearerToken } from "../identity/http.js";
 import { validateSession } from "../identity/service.js";
-import { ASSISTANT_MODEL } from "./assistant-config.js";
+import { resolveAssistantProvider } from "./assistant-config.js";
 import { askAssistant, QuestionTooLongError } from "./assistant-service.js";
-import { AssistantUnavailableError, createConfiguredClaudeClient, type ClaudeClient } from "./claude-client.js";
+import { AssistantUnavailableError, createConfiguredAssistantClient, type AssistantClient } from "./assistant-client.js";
 
 async function authenticatedIdentity(request: FastifyRequest) {
   const token = extractBearerToken(request.headers.authorization);
@@ -16,7 +16,8 @@ async function authenticatedIdentity(request: FastifyRequest) {
  */
 export function registerAssistantRoutes(
   app: FastifyInstance,
-  clientFactory: () => ClaudeClient | null = createConfiguredClaudeClient,
+  clientFactory: () => Promise<AssistantClient | null> | AssistantClient | null = () =>
+    createConfiguredAssistantClient(),
 ): void {
   /**
    * Lets the UI tell the user, before they ask anything, whether the
@@ -27,7 +28,18 @@ export function registerAssistantRoutes(
   app.get("/identity/assistant/status", async (request, reply) => {
     const identity = await authenticatedIdentity(request);
     if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
-    return { available: clientFactory() !== null, provider: "anthropic", model: ASSISTANT_MODEL };
+
+    const provider = resolveAssistantProvider();
+    return {
+      available: (await clientFactory()) !== null,
+      provider: provider?.id ?? null,
+      model: provider?.model ?? null,
+      destination: provider?.destination ?? null,
+      // The disclosure hinges on this: in local mode nothing leaves the
+      // machine, and the UI must be able to say so rather than repeating a
+      // third-party warning that no longer applies.
+      leavesMachine: provider?.leavesMachine ?? false,
+    };
   });
 
   app.post<{ Body: { question?: unknown } }>("/identity/assistant/ask", async (request, reply) => {
@@ -37,7 +49,7 @@ export function registerAssistantRoutes(
     const question = typeof request.body?.question === "string" ? request.body.question : "";
 
     try {
-      const result = await askAssistant(identity.identityId, question, clientFactory());
+      const result = await askAssistant(identity.identityId, question, await clientFactory());
       return result;
     } catch (error) {
       if (error instanceof QuestionTooLongError) return reply.code(400).send({ error: error.message });

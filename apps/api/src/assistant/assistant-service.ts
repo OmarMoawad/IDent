@@ -1,6 +1,6 @@
 import { MAX_QUESTION_LENGTH } from "./assistant-config.js";
 import { buildAssistantContext } from "./assistant-retrieval.js";
-import { AssistantUnavailableError, type ClaudeClient } from "./claude-client.js";
+import { AssistantUnavailableError, type AssistantClient } from "./assistant-client.js";
 
 export type AssistantResult = {
   answer: string;
@@ -27,7 +27,7 @@ export class QuestionTooLongError extends Error {
 export async function askAssistant(
   identityId: string,
   question: string,
-  client: ClaudeClient | null,
+  client: AssistantClient | null,
 ): Promise<AssistantResult> {
   const trimmed = question.trim();
   if (!trimmed) throw new QuestionTooLongError();

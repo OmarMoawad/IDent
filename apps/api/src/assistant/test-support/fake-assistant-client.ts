@@ -1,4 +1,4 @@
-import type { AssistantAnswer, ClaudeClient } from "../claude-client.js";
+import type { AssistantAnswer, AssistantClient } from "../assistant-client.js";
 
 /**
  * Records exactly what would have been sent to Anthropic, so tests can
@@ -6,7 +6,7 @@ import type { AssistantAnswer, ClaudeClient } from "../claude-client.js";
  * should and, more importantly, that it does not contain what it
  * shouldn't.
  */
-export class FakeClaudeClient implements ClaudeClient {
+export class FakeAssistantClient implements AssistantClient {
   public calls: Array<{ question: string; context: string }> = [];
 
   constructor(private readonly answer: Partial<AssistantAnswer> = {}) {}

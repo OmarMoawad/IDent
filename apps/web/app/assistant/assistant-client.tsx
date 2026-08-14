@@ -7,7 +7,14 @@ import { apiGet, apiPost } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
 import styles from "./assistant.module.css";
 
-type AssistantStatus = { available: boolean; provider: string; model: string };
+type AssistantStatus = {
+  available: boolean;
+  provider: string | null;
+  model: string | null;
+  destination: string | null;
+  /** Whether a question leaves this machine — drives the disclosure below. */
+  leavesMachine: boolean;
+};
 type ContextSent = { messages: number; events: number; contacts: number; reminders: number };
 type AskResult = { answer: string; refused: boolean; contextSent: ContextSent };
 
@@ -89,11 +96,21 @@ export function AssistantClient() {
         <div>
           <h2>Ask about your own data</h2>
           {/* Disclosure before the first question, not buried in a policy. */}
-          <p>
-            {status?.available
-              ? `Read-only. Questions and a small, relevant slice of your data are sent to ${status.provider} (${status.model}) to generate an answer.`
-              : "The assistant is not configured on this server."}
-          </p>
+          {!status?.available ? (
+            <p>The assistant is not configured on this server.</p>
+          ) : status.leavesMachine ? (
+            <p>
+              Read-only. Your question and a small, relevant slice of your data are sent to{" "}
+              {status.destination} ({status.model}) to generate an answer.
+            </p>
+          ) : (
+            // Local mode: the third-party warning would be false here, and
+            // saying it anyway would train people to ignore it.
+            <p>
+              Read-only, and running on {status.destination} ({status.model}). Your question and your data do not
+              leave this machine.
+            </p>
+          )}
         </div>
       </section>
 

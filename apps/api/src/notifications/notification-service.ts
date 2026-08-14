@@ -113,6 +113,19 @@ async function recordDeliveryError(identityId: string, message: string): Promise
 }
 
 /**
+ * Recording the error must not itself become a way to fail differently for
+ * a live token — if the database is the thing that broke, this write is
+ * broken too. Swallowed deliberately; the route still logs the original.
+ */
+async function tryRecordDeliveryError(identityId: string, message: string): Promise<void> {
+  try {
+    await recordDeliveryError(identityId, message);
+  } catch {
+    // Intentionally empty: see above.
+  }
+}
+
+/**
  * Notifications need a connected source because `messages` is tied to one
  * by composite foreign key. Rather than weaken that constraint — it is
  * what stops a row belonging to one identity while pointing at another's
@@ -150,7 +163,7 @@ export function safeActionUrl(raw: unknown): string | null {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new InvalidNotificationError("actionUrl must be http or https.");
   }
-  return parsed.toString();
+  return stripNulBytes(parsed.toString());
 }
 
 export type NotificationInput = {
@@ -167,8 +180,30 @@ export type NotificationInput = {
 /**
  * Every outcome is `accepted` from the caller's point of view. See
  * ingestNotification for why.
+ *
+ * `internalError` is for the *operator*, never the caller: the route logs
+ * it and still sends the same body. It rides on the result rather than
+ * being thrown so that "this function does not throw" is a property of the
+ * type, not a promise the next edit can quietly break.
  */
-export type IngestResult = { status: "accepted"; messageId?: string };
+export type IngestResult = { status: "accepted"; messageId?: string; internalError?: unknown };
+
+/**
+ * Postgres cannot store a NUL byte in a `text` column — it rejects the
+ * parameter as an invalid UTF-8 byte sequence. That made an unremarkable
+ * string a database error rather than a validation error, which is how it
+ * became a live-token oracle (see ingestNotification). Handled as what it
+ * is: malformed input from the sender, refused here and recorded for the
+ * owner, rather than a fault reported as ours.
+ */
+const NUL_BYTE = "\u0000";
+
+function stripNulBytes(value: string): string {
+  // Split/join rather than a /g regex: a global regex carries lastIndex
+  // between calls, so sharing one with a .test() below would make the
+  // check alternate true/false on identical input.
+  return value.split(NUL_BYTE).join("");
+}
 
 function requireString(value: unknown, field: string, max: number): string {
   if (typeof value !== "string" || !value.trim()) {
@@ -176,6 +211,7 @@ function requireString(value: unknown, field: string, max: number): string {
   }
   const trimmed = value.trim();
   if (trimmed.length > max) throw new InvalidNotificationError(`${field} must be ${max} characters or fewer.`);
+  if (trimmed.includes(NUL_BYTE)) throw new InvalidNotificationError(`${field} must not contain NUL bytes.`);
   return trimmed;
 }
 
@@ -191,6 +227,23 @@ function requireString(value: unknown, field: string, max: number): string {
  * live, so the claim was wrong and the behaviour is now what the claim
  * said. Rejections are recorded against the endpoint instead, where the
  * owner — and only the owner — can read them.
+ *
+ * Objective 0 review (2026-08-14) asked whether any way to tell the two
+ * apart survived. One did, and it was reachable: only
+ * `InvalidNotificationError` was handled and every other throw became a
+ * 500, which only a live token could reach, since a dead one returns
+ * before any write. A NUL byte in `title` was enough — it passes every
+ * length and type check here, and Postgres then rejects it as an invalid
+ * UTF-8 byte sequence, so `{app, title: "x\u0000y"}` answered 500 for a
+ * live token and 202 for a dead one. Verified against the real database,
+ * not reasoned about.
+ *
+ * Closed twice over: NUL bytes are now rejected as invalid input, and the
+ * catch-all below means no future fallible write can reopen the oracle in
+ * silence. The one distinguisher that remains is **timing** — a dead token
+ * costs one indexed lookup, a live one several writes — which is not
+ * closed here, and is written down in IDent_STATE.md rather than claimed
+ * away.
  */
 export async function ingestNotification(token: string, input: NotificationInput): Promise<IngestResult> {
   const identityId = await resolveIdentity(token);
@@ -199,7 +252,7 @@ export async function ingestNotification(token: string, input: NotificationInput
   try {
     const app = requireString(input.app, "app", MAX_APP_LENGTH);
     const title = requireString(input.title, "title", MAX_TITLE_LENGTH);
-    const body = typeof input.body === "string" ? input.body.trim().slice(0, MAX_BODY_LENGTH) : null;
+    const body = typeof input.body === "string" ? stripNulBytes(input.body.trim()).slice(0, MAX_BODY_LENGTH) : null;
     const actionUrl = safeActionUrl(input.actionUrl);
 
     const occurredAt = typeof input.occurredAt === "string" ? new Date(input.occurredAt) : new Date();
@@ -213,7 +266,7 @@ export async function ingestNotification(token: string, input: NotificationInput
     // deduplicate what we cannot identify.
     const externalId =
       typeof input.externalId === "string" && input.externalId.trim()
-        ? `${app}:${input.externalId.trim()}`.slice(0, 300)
+        ? stripNulBytes(`${app}:${input.externalId.trim()}`).slice(0, 300)
         : `${app}:${randomBytes(12).toString("base64url")}`;
 
     const message = await upsertMessage({
@@ -238,9 +291,13 @@ export async function ingestNotification(token: string, input: NotificationInput
     return { status: "accepted", messageId: message.id };
   } catch (error) {
     if (error instanceof InvalidNotificationError) {
-      await recordDeliveryError(identityId, error.message);
+      await tryRecordDeliveryError(identityId, error.message);
       return { status: "accepted" };
     }
-    throw error;
+    // Anything else is a fault on our side, not the sender's. The owner is
+    // told that a delivery failed, in terms that describe nothing about the
+    // internals; the operator gets the real error through the route's log.
+    await tryRecordDeliveryError(identityId, "An internal error prevented this delivery from being stored.");
+    return { status: "accepted", internalError: error };
   }
 }

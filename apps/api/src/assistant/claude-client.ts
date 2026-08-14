@@ -1,44 +1,26 @@
 import Anthropic from "@anthropic-ai/sdk";
-import {
-  ASSISTANT_MODEL,
-  ASSISTANT_SYSTEM_PROMPT,
-  MAX_OUTPUT_TOKENS,
-  readAnthropicApiKey,
-} from "./assistant-config.js";
+import { ASSISTANT_SYSTEM_PROMPT, MAX_OUTPUT_TOKENS, type AssistantProvider } from "./assistant-config.js";
+import type { AssistantAnswer, AssistantClient } from "./assistant-client.js";
 
 /**
- * The network boundary for the assistant, behind an interface so tests
- * never call Anthropic — the same convention gmail-api-client.ts and
- * calendar-api-client.ts already use for Google.
+ * The Anthropic implementation of the provider boundary.
+ *
+ * Kept as its own class rather than folded into the OpenAI-compatible one:
+ * the wire shapes differ in ways that matter here — Anthropic returns a
+ * `refusal` stop reason as a normal 200, which has to be checked before
+ * reading content, and the content is a block array rather than a single
+ * string.
  */
-export type AssistantAnswer = {
-  text: string;
-  /** True when the model declined rather than answered. */
-  refused: boolean;
-  usage: { inputTokens: number; outputTokens: number };
-};
-
-export interface ClaudeClient {
-  ask(input: { question: string; context: string }): Promise<AssistantAnswer>;
-}
-
-export class AssistantUnavailableError extends Error {
-  constructor(message = "The assistant is not configured.") {
-    super(message);
-    this.name = "AssistantUnavailableError";
-  }
-}
-
-export class RealClaudeClient implements ClaudeClient {
+export class AnthropicAssistantClient implements AssistantClient {
   private readonly client: Anthropic;
 
-  constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey });
+  constructor(private readonly provider: AssistantProvider) {
+    this.client = new Anthropic({ apiKey: provider.apiKey ?? undefined });
   }
 
   async ask({ question, context }: { question: string; context: string }): Promise<AssistantAnswer> {
     const response = await this.client.messages.create({
-      model: ASSISTANT_MODEL,
+      model: this.provider.model,
       max_tokens: MAX_OUTPUT_TOKENS,
       system: ASSISTANT_SYSTEM_PROMPT,
       messages: [
@@ -74,10 +56,4 @@ export class RealClaudeClient implements ClaudeClient {
       usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
     };
   }
-}
-
-/** Built from environment configuration; null when no API key is set. */
-export function createConfiguredClaudeClient(): ClaudeClient | null {
-  const apiKey = readAnthropicApiKey();
-  return apiKey ? new RealClaudeClient(apiKey) : null;
 }
