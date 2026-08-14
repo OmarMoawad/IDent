@@ -60,7 +60,14 @@ export function registerNotificationRoutes(app: FastifyInstance): void {
   const handler = async (request: FastifyRequest<{ Params: { token?: string }; Body: Record<string, unknown> }>) => {
     const header = request.headers[NOTIFICATION_TOKEN_HEADER];
     const token = (typeof header === "string" && header) || request.params.token || "";
-    await ingestNotification(token, request.body ?? {});
+    const result = await ingestNotification(token, request.body ?? {});
+    // An unexpected fault is logged, never signalled: a 500 here would be
+    // reachable only with a live token, which is the exact distinction the
+    // uniform 202 exists to remove. The literal below, rather than
+    // `result`, is also what keeps messageId off the wire.
+    if (result.internalError) {
+      request.log.error({ err: result.internalError }, "notification ingest failed unexpectedly");
+    }
     return { status: "accepted" };
   };
 

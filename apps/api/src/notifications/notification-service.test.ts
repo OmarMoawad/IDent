@@ -146,6 +146,74 @@ describe("the ingest endpoint reveals nothing about the token", () => {
     await app.close();
   });
 
+  // Objective 0 review, 2026-08-14. The question IDent_STATE.md left for
+  // the reviewer was whether any way to distinguish a live token from a
+  // dead one survived the uniform-202 change. One did, and it was
+  // reachable from the wire: a NUL byte passes every check in
+  // requireString, and Postgres then rejects the parameter as invalid
+  // UTF-8. That threw a DrizzleQueryError, which was not an
+  // InvalidNotificationError and so was rethrown as a 500 — reachable only
+  // with a live token, because a dead one returns before any write.
+  it("answers 202 for a NUL byte too, which used to 500 only for a live token", async () => {
+    const app = buildApp();
+    const identity = await register(app);
+    const { token } = await mintToken(app, identity.sessionToken);
+    const nul = String.fromCharCode(0);
+
+    const live = await ingest(app, token, { app: "GitHub", title: `pull${nul}request` });
+    const dead = await ingest(app, "never-issued-token", { app: "GitHub", title: `pull${nul}request` });
+
+    for (const response of [live, dead]) {
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toEqual({ status: "accepted" });
+    }
+    await app.close();
+  });
+
+  it("treats a NUL byte as the sender's malformed input, not an internal fault", async () => {
+    // The distinction matters to the owner reading lastError: "we could not
+    // store this" and "you sent something invalid" are different debugging
+    // stories, and this one is the sender's.
+    const app = buildApp();
+    const identity = await register(app);
+    const { token } = await mintToken(app, identity.sessionToken);
+
+    await ingest(app, token, { app: "GitHub", title: `pull${String.fromCharCode(0)}request` });
+    const status = await app.inject({
+      method: "GET",
+      url: "/identity/notifications/endpoint",
+      headers: bearer(identity.sessionToken),
+    });
+    expect(status.json().lastError).toMatch(/NUL bytes/);
+    await app.close();
+  });
+
+  it("stores a notification whose optional fields carry NUL bytes", async () => {
+    // body and externalId are forgiving fields, so they are stripped rather
+    // than refused — a delivery that is otherwise fine still lands.
+    const app = buildApp();
+    const identity = await register(app);
+    const { token } = await mintToken(app, identity.sessionToken);
+    const nul = String.fromCharCode(0);
+
+    const response = await ingest(app, token, {
+      app: "GitHub",
+      title: "Review requested",
+      body: `merge${nul}conflict`,
+      externalId: `pr${nul}42`,
+    });
+    expect(response.statusCode).toBe(202);
+
+    const status = await app.inject({
+      method: "GET",
+      url: "/identity/notifications/endpoint",
+      headers: bearer(identity.sessionToken),
+    });
+    // Nothing was rejected, so no error was recorded against the endpoint.
+    expect(status.json().lastError).toBeNull();
+    await app.close();
+  });
+
   it("still lets the owner see why a delivery was rejected", async () => {
     // The sender learns nothing; the owner must still be able to debug.
     const app = buildApp();

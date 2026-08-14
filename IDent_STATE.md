@@ -1482,6 +1482,18 @@ here. Re-check `npm audit` when drizzle-kit cuts a new release.
   browsers/authenticators that don't support PRF at all (the
   `PRF_UNSUPPORTED_PLACEHOLDER` fallback path is implemented but has not
   been observed firing against a real non-PRF authenticator).
+- **The notification ingest endpoint still leaks token liveness through
+  timing.** Objective 0's review question — "is there any remaining way for
+  a caller to distinguish a live token from a dead one?" — turned out to
+  have two answers. The first was a real, wire-reachable oracle and is
+  fixed (see below). The second is not fixed: a dead token costs one
+  indexed hash lookup and returns, while a live one costs a source upsert
+  and a message upsert, so response time separates them. Enumeration is
+  still hopeless against 144 bits; the exposure is that someone holding a
+  *leaked* token can confirm it is live, which is the same threat the
+  uniform 202 was written for. Closing it means making both paths do
+  comparable work, or accepting it explicitly — decide before this endpoint
+  is reachable from the public internet, not after.
 - CI logs a deprecation warning (not a failure) that `actions/checkout@v4`
   and `actions/setup-node@v4` target Node 20, which GitHub is forcing onto
   Node 24 runners in the meantime. Bump both actions to their Node
