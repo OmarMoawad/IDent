@@ -3,6 +3,7 @@
 import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import { startRegistration } from "@simplewebauthn/browser";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { unwrapAmk, wrapAmk } from "../../lib/amk";
 import { ApiError, apiGet, apiPost, apiPut } from "../../lib/api";
@@ -235,6 +236,7 @@ export default function AccountPage() {
   return (
     <main>
       <h1>Account</h1>
+      <p><Link href="/inbox">Open unified inbox</Link></p>
       <dl>
         <dt>Username</dt>
         <dd>{auth.username}</dd>

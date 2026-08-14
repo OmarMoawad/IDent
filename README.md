@@ -18,7 +18,8 @@ your keys once the session ends.
 > **Status: Phase 0 (Identity Core) done, Phase 1 (Communications Hub) in
 > progress.** Real username+password accounts, passkeys, recovery codes,
 > and step-up auth are all built and browser-verified; Phase 1's schema
-> foundation and a real Gmail OAuth connector are in, no UI yet. The
+> foundation, real Gmail OAuth/sync, and the first protected unified inbox
+> UI are in. The
 > progress bar above is regenerated after each session
 > (`scripts/generate-progress-svg.mjs`) — see
 > [IDent_STATE.md](IDent_STATE.md) for exactly what's done vs. pending in
