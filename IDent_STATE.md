@@ -1948,8 +1948,12 @@ what was demonstrated, on what, at which commit.
 **Verified:** 289 tests pass (API 254 + 3 skipped, web 35), run
 2026-08-14 19:29 local on branch `agent/session-22-foundation`, base
 `6c45c0a`, against local Postgres 16 on `localhost:5432`. Typecheck clean
-across all workspaces. **Not CI** — CI has not run this branch yet, so
-"green" here means one local run on one machine, at that time.
+across all workspaces.
+
+CI has since confirmed it independently: run
+[31820493701](https://github.com/OmarMoawad/IDent/actions/runs/31820493701)
+concluded `success` on this branch, checked 2026-08-14. PR
+[#7](https://github.com/OmarMoawad/IDent/pull/7).
 
 ### 1. Real-browser click-through — four bugs, three fixed here
 
