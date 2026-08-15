@@ -7,16 +7,40 @@ import { apiGet, apiPost } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
 import styles from "./assistant.module.css";
 
+type EgressTier = "same_process" | "loopback" | "same_machine" | "private_network" | "public_internet" | "unknown";
+
+type Egress = {
+  tier: EgressTier;
+  /** Server-composed positive statement of where processing happens. */
+  statement: string;
+  origin: string;
+  reason: string;
+  resolvedAddresses: string[];
+  proxiedVia?: string;
+  caveat: string;
+};
+
 type AssistantStatus = {
   available: boolean;
   provider: string | null;
   model: string | null;
   destination: string | null;
-  /** Whether a question leaves this machine — drives the disclosure below. */
+  /**
+   * Named tier, not a boolean — session 22. Drives the disclosure below.
+   * Nullable because a server with nothing configured has no destination
+   * to classify.
+   */
+  egress: Egress | null;
+  /** Retained mirror; `egress.tier` is what the disclosure reads. */
   leavesMachine: boolean;
 };
 type ContextSent = { messages: number; events: number; contacts: number; reminders: number };
 type AskResult = { answer: string; refused: boolean; contextSent: ContextSent };
+
+/** Mirrors the server's rule in egress.ts — `unknown` counts as leaving. */
+function tierLeavesMachine(tier: EgressTier): boolean {
+  return tier !== "same_process" && tier !== "loopback";
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong.";
@@ -98,17 +122,18 @@ export function AssistantClient() {
           {/* Disclosure before the first question, not buried in a policy. */}
           {!status?.available ? (
             <p>The assistant is not configured on this server.</p>
-          ) : status.leavesMachine ? (
-            <p>
-              Read-only. Your question and a small, relevant slice of your data are sent to{" "}
-              {status.destination} ({status.model}) to generate an answer.
-            </p>
           ) : (
-            // Local mode: the third-party warning would be false here, and
-            // saying it anyway would train people to ignore it.
-            <p>
-              Read-only, and running on {status.destination} ({status.model}). Your question and your data do not
-              leave this machine.
+            // Session 22: state where processing happens, positively, in
+            // every mode. Hiding the third-party warning in local mode was
+            // right; saying *nothing* was not — an absent warning is not a
+            // claim the user can check. The server composes the sentence
+            // from the egress tier so the UI cannot drift from it.
+            <p className={styles.disclosure} data-tier={status.egress?.tier ?? "unknown"}>
+              <strong>Read-only.</strong>{" "}
+              {status.egress?.statement ?? "Where this is processed could not be established."}{" "}
+              {status.egress && tierLeavesMachine(status.egress.tier)
+                ? `Your question and a small, relevant slice of your data are sent there (${status.model}) to generate an answer.`
+                : `Your question and your data stay on this machine (${status.model}).`}
             </p>
           )}
         </div>

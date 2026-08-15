@@ -35,3 +35,12 @@
 .error { padding: .8rem 1rem; border-radius: 10px; background: #fee9e7; color: #8b1f16; }
 .status { padding: .8rem 1rem; border-radius: 10px; background: #e4f4e9; color: #24543b; }
 @media (min-width: 760px) { .layout { grid-template-columns: minmax(18rem, .9fr) minmax(0, 1.4fr); } }
+
+/*
+ * Session 22 — the egress disclosure. Tiers past loopback get a warmer
+ * border so "this left the machine" is visible before the sentence is
+ * read; the sentence itself still carries the actual claim.
+ */
+.disclosure { border-left: 3px solid #3f7d5a; padding-left: .6rem; }
+.disclosure[data-tier="same_machine"], .disclosure[data-tier="private_network"] { border-left-color: #b8860b; }
+.disclosure[data-tier="public_internet"], .disclosure[data-tier="unknown"] { border-left-color: #a4552e; }
