@@ -126,6 +126,30 @@ async function tryRecordDeliveryError(identityId: string, message: string): Prom
 }
 
 /**
+ * Clears the recorded rejection once a delivery succeeds.
+ *
+ * Found in session 22's browser click-through: `lastError` was only ever
+ * cleared when the token was *regenerated*, so a single malformed payload
+ * left "Last delivery rejected: ..." on the inbox permanently. Four good
+ * deliveries later the banner still claimed the last delivery had failed —
+ * which is exactly the opposite of what it says, and it pushes the owner
+ * toward regenerating a working token to silence it.
+ *
+ * Swallowed on failure for the same reason as the error path above: this
+ * write must never become a way to distinguish a live token.
+ */
+async function tryClearDeliveryError(identityId: string): Promise<void> {
+  try {
+    await db
+      .update(notificationEndpoints)
+      .set({ lastError: null, lastErrorAt: null })
+      .where(eq(notificationEndpoints.identityId, identityId));
+  } catch {
+    // Intentionally empty: see above.
+  }
+}
+
+/**
  * Notifications need a connected source because `messages` is tied to one
  * by composite foreign key. Rather than weaken that constraint — it is
  * what stops a row belonging to one identity while pointing at another's
@@ -287,6 +311,11 @@ export async function ingestNotification(token: string, input: NotificationInput
       kind: "notification",
       actionUrl,
     });
+
+    // A good delivery retires any recorded rejection, so the banner
+    // describes the current state rather than the worst thing that ever
+    // happened to this endpoint.
+    await tryClearDeliveryError(identityId);
 
     return { status: "accepted", messageId: message.id };
   } catch (error) {

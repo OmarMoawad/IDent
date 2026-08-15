@@ -214,6 +214,35 @@ describe("the ingest endpoint reveals nothing about the token", () => {
     await app.close();
   });
 
+  it("retires a recorded rejection once a delivery succeeds", async () => {
+    // Session 22 click-through: lastError was only cleared by regenerating
+    // the token, so one malformed payload left "Last delivery rejected" on
+    // the inbox forever — including after four good deliveries. The banner
+    // must describe the current state, not the worst thing that ever
+    // happened to this endpoint.
+    const app = buildApp();
+    const identity = await register(app);
+    const { token } = await mintToken(app, identity.sessionToken);
+    const readStatus = async () =>
+      (
+        await app.inject({
+          method: "GET",
+          url: "/identity/notifications/endpoint",
+          headers: bearer(identity.sessionToken),
+        })
+      ).json();
+
+    await ingest(app, token, { app: "GitHub" });
+    expect((await readStatus()).lastError).toMatch(/title is required/);
+
+    await ingest(app, token, validPayload);
+
+    const status = await readStatus();
+    expect(status.lastError).toBeNull();
+    expect(status.lastErrorAt).toBeNull();
+    await app.close();
+  });
+
   it("still lets the owner see why a delivery was rejected", async () => {
     // The sender learns nothing; the owner must still be able to debug.
     const app = buildApp();

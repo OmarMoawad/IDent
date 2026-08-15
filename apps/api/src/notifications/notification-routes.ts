@@ -40,6 +40,17 @@ export function registerNotificationRoutes(app: FastifyInstance): void {
       token,
       header: NOTIFICATION_TOKEN_HEADER,
       path: "/notifications/ingest",
+      /**
+       * The required payload shape, returned with the token because the
+       * UI previously showed the endpoint and the header and nothing
+       * about the body — so following the on-screen instructions exactly
+       * produced a rejection ("app is required") that the sender never
+       * sees, since ingest always answers 202. Found in session 22's
+       * click-through.
+       */
+      requiredFields: ["app", "title"],
+      optionalFields: ["body", "externalId", "occurredAt", "actionUrl"],
+      example: { app: "GitHub", title: "Build passed", body: "main is green." },
       // Said plainly because the UI cannot show it again.
       notice: "Copy this now — it is stored only as a hash and cannot be shown again.",
     });
