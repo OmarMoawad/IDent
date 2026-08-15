@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { extractBearerToken } from "../identity/http.js";
 import { validateSession } from "../identity/service.js";
 import { resolveAssistantProvider } from "./assistant-config.js";
+import { classifyUrl, dnsRebindingCaveat } from "./egress.js";
 import { askAssistant, QuestionTooLongError } from "./assistant-service.js";
 import { AssistantUnavailableError, createConfiguredAssistantClient, type AssistantClient } from "./assistant-client.js";
 
@@ -30,15 +31,36 @@ export function registerAssistantRoutes(
     if (!identity) return reply.code(401).send({ error: "Missing or invalid session token." });
 
     const provider = resolveAssistantProvider();
+
+    // Provider resolution classifies synchronously and cannot do DNS, so a
+    // hostname base URL reads `unknown` there. This route can await, so it
+    // resolves properly — and the resolved answer is what the user is
+    // shown. Only the OpenAI-compatible path has a base URL to resolve;
+    // Anthropic's tier is known by construction.
+    const egress =
+      provider?.baseUrl && provider.egress.tier === "unknown"
+        ? await classifyUrl(provider.baseUrl)
+        : (provider?.egress ?? null);
+
     return {
       available: (await clientFactory()) !== null,
       provider: provider?.id ?? null,
       model: provider?.model ?? null,
       destination: provider?.destination ?? null,
-      // The disclosure hinges on this: in local mode nothing leaves the
-      // machine, and the UI must be able to say so rather than repeating a
-      // third-party warning that no longer applies.
-      leavesMachine: provider?.leavesMachine ?? false,
+      // The disclosure is a named tier, not a boolean: a LAN peer, a VPN
+      // peer and a hosted API are different things to tell someone, and
+      // session 21's boolean said the same word for all three.
+      egress: egress && {
+        tier: egress.tier,
+        statement: egress.statement,
+        origin: egress.origin,
+        reason: egress.reason,
+        resolvedAddresses: egress.resolvedAddresses,
+        ...(egress.proxiedVia ? { proxiedVia: egress.proxiedVia } : {}),
+        caveat: dnsRebindingCaveat,
+      },
+      // Retained for existing callers. `egress.tier` is the source of truth.
+      leavesMachine: egress?.leavesMachine ?? false,
     };
   });
 

@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenAICompatibleClient } from "./openai-compatible-client.js";
 import type { AssistantProvider } from "./assistant-config.js";
+import { classifyUrlSync } from "./egress.js";
 
+const baseUrl = "http://localhost:11434/v1";
 const provider: AssistantProvider = {
   id: "openai_compatible",
   model: "llama3.1:8b",
-  baseUrl: "http://localhost:11434/v1",
+  baseUrl,
   apiKey: null,
-  destination: "a model running on this machine",
+  destination: baseUrl,
+  // Built by the real classifier rather than hand-written, so this fixture
+  // cannot drift from what resolution actually produces.
+  egress: classifyUrlSync(baseUrl, {} as NodeJS.ProcessEnv),
   leavesMachine: false,
 };
 

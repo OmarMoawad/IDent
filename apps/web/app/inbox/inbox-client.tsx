@@ -47,7 +47,14 @@ export function InboxClient() {
   const [error, setError] = useState<string | null>(null);
   const [priorities, setPriorities] = useState<Record<string, Priority>>({});
   const [kind, setKind] = useState<"" | "message" | "notification">("");
-  const [endpoint, setEndpoint] = useState<{ token: string; header: string; path: string; notice: string } | null>(null);
+  const [endpoint, setEndpoint] = useState<{
+    token: string;
+    header: string;
+    path: string;
+    notice: string;
+    requiredFields?: string[];
+    example?: Record<string, unknown>;
+  } | null>(null);
   const [endpointStatus, setEndpointStatus] = useState<{ configured: boolean; lastError: string | null } | null>(null);
 
   const loadMessages = useCallback(async (nextQuery = query, nextKind = kind) => {
@@ -82,7 +89,14 @@ export function InboxClient() {
     setError(null);
     try {
       setEndpoint(
-        await apiPost<{ token: string; header: string; path: string; notice: string }>(
+        await apiPost<{
+          token: string;
+          header: string;
+          path: string;
+          notice: string;
+          requiredFields?: string[];
+          example?: Record<string, unknown>;
+        }>(
           "/identity/notifications/endpoint",
           {},
           auth.sessionToken,
@@ -260,6 +274,17 @@ export function InboxClient() {
                   {endpoint.header}: {endpoint.token}
                 </code>
               </p>
+              {/*
+                The body shape, not just the address. Showing the endpoint
+                and the header alone was enough to get a rejection the
+                sender is never told about — ingest always answers 202.
+              */}
+              {endpoint.example && (
+                <p>
+                  Required fields: <code>{(endpoint.requiredFields ?? []).join(", ")}</code>. For example:{" "}
+                  <code>{JSON.stringify(endpoint.example)}</code>
+                </p>
+              )}
               {/* Stated outright, because it is true and irreversible. */}
               <p role="status">{endpoint.notice}</p>
             </>
