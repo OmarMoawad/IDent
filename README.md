@@ -98,10 +98,17 @@ telling the sender anything.
 ### Assistant providers (session 21)
 
 The assistant is provider-neutral. One OpenAI-compatible implementation
-covers Ollama, vLLM, llama.cpp's server, and the hosted OpenAI-compatible
+reaches Ollama, vLLM, llama.cpp's server, and the hosted OpenAI-compatible
 APIs; Anthropic has its own implementation because its wire shape differs
 (a refusal arrives as a normal 200 that must be checked before reading
 content).
+
+**"OpenAI-compatible" is not one wire format.** Session 21's phrasing
+implied a single shared protocol. In practice compatibility is
+endpoint-specific and version-dependent across Ollama, vLLM and
+llama.cpp — they agree on the shape of `/chat/completions` and diverge on
+much else, so each backend needs its own verification rather than an
+assumption of equivalence. Only Ollama has actually been exercised here.
 
 Run it fully locally — nothing leaves the machine:
 
@@ -110,7 +117,32 @@ ollama pull llama3.2:3b
 ASSISTANT_PROVIDER=local npm run dev:api
 ```
 
-`GET /identity/assistant/status` reports `leavesMachine`, derived from the
-resolved base URL rather than the provider name, and the UI's disclosure
-follows it. With nothing configured the assistant is unavailable — it never
-falls back to a default that would ship data somewhere unchosen.
+`GET /identity/assistant/status` reports an **egress tier**, derived from
+the resolved base URL rather than the provider name, and the UI's
+disclosure is built from it. With nothing configured the assistant is
+unavailable — it never falls back to a default that would ship data
+somewhere unchosen.
+
+The tiers, least to most exposed: `same_process`, `loopback`,
+`same_machine` (this host, but via a real interface rather than
+loopback), `private_network` (LAN, VPN, private overlay),
+`public_internet`, and `unknown` — which is treated as leaving, because
+an unverifiable destination is not a safe one. Session 21 had a boolean
+here, and a boolean cannot tell a LAN box apart from a hosted API. See
+`apps/api/src/assistant/egress.ts` for what a tier does and does not
+establish (multi-address names, DNS rebinding, redirects, proxies).
+
+### Local model choice
+
+`llama3.2:3b` is the default, chosen by measurement and re-measured under
+a documented method in session 22 — see
+[docs/benchmarks/local-model-2026-08-14.md](docs/benchmarks/local-model-2026-08-14.md)
+and `scripts/benchmark-local-model.mjs`. On one 8 GiB M1 configuration it
+answers a fixed prompt in 0.72 s warm (median of five, 26.49 tok/s)
+against `llama3.1:8b`'s 67.47 s (0.09 tok/s), with both correct on 5/5
+runs. The 8B does not fit in that machine's memory: a single generation
+drove 458 944 page swap-outs where the 3B drove none.
+
+Local inference has **no per-request provider charge**. It is not "zero
+marginal cost" — that phrasing ignores power, hardware, and the support
+burden of running it.

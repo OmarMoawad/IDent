@@ -258,6 +258,60 @@ Two things make this a real guarantee rather than a label:
   warning that is false in the current configuration teaches people to
   ignore the ones that are true.
 
+### Egress classification policy (session 22)
+
+Session 21 implemented the above as a boolean, `isLoopbackUrl`. That was
+too coarse for the guarantee this page makes: a LAN box, a VPN peer and a
+hosted API all returned the same answer and were shown to the user
+identically. Classification is now a named tier, and the tier is what the
+UI renders — `apps/api/src/assistant/egress.ts`.
+
+| Tier | Meaning | Leaves the machine? |
+| --- | --- | --- |
+| `same_process` | Unix domain socket; never crosses a network interface | No |
+| `loopback` | This host's loopback interface | No |
+| `same_machine` | This host, reached over a real interface — anything that can route to that address can reach it too | **Yes** |
+| `private_network` | LAN, VPN, or private overlay (Tailscale/WireGuard ULA, link-local, CGNAT) | Yes, but not to the public internet |
+| `public_internet` | A routable public address, or a known hosted API | Yes |
+| `unknown` | Could not be established | **Treated as yes** |
+
+`unknown` counts as leaving on purpose: an unverifiable destination is not
+a safe one, and the safe direction for a disclosure is always toward the
+more alarming claim.
+
+**Specified behaviour for the awkward cases**, because a classification
+that is silent about them is a classification that will be wrong quietly:
+
+- **A name resolving to several addresses** — every address is classified
+  and the **widest** tier is reported. A name resolving to both
+  `127.0.0.1` and a public address can send traffic to the public one.
+- **DNS rebinding** — a tier is a point-in-time observation, not a lease.
+  The resolved-time caveat is returned to the client alongside the tier.
+  Pinning the resolved address for the life of the connection is the
+  mitigation, and it is **not implemented** — stated here rather than
+  implied away.
+- **Redirects** — the tier describes the first hop only. A client that
+  follows redirects invalidates the claim.
+- **Proxies** — an `HTTP(S)_PROXY` in the environment can carry a
+  loopback-*looking* request off the machine, so a configured proxy
+  overrides the address-derived tier, honouring `NO_PROXY` exemptions. A
+  request is classified by where the proxy is, not by where the URL
+  points.
+
+**Known limit:** classification is of the configured origin, not a runtime
+guarantee about where bytes actually went. It is a disclosure mechanism,
+not an egress *control*. Nothing here prevents a misconfigured deployment
+from sending data somewhere; it makes the destination visible and named.
+
+### The disclosure asserts, rather than omitting
+
+Hiding the third-party warning in local mode was right. Showing *nothing*
+in its place was not — an absent warning is not a claim anyone can check.
+The UI now states where processing happens in **every** mode, positively:
+"Processed locally at `http://localhost:11434`, on this machine's loopback
+interface. Nothing leaves this machine." The sentence is composed on the
+server from the tier, so the UI cannot drift from the classification.
+
 What has **not** changed: this is the strongest privacy posture available
 here, but the quality/latency tradeoff against a hosted frontier model is
 real, and running a competitive model on your own hardware still costs
