@@ -5,7 +5,15 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-> **Next action: Session 23 — the production-like vertical slice.**
+> **Next action: Session 22b — act on the external review.** An external
+> review of `main` at `f268e647` returned the verdict **keep IDent
+> local/private**, naming CORS, rate limiting, encryption-key enforcement
+> and the missing production foundation as immediate blockers. Session 23
+> is now explicitly gated behind the first three — deploying a service
+> with no rate limiting and a committed key fallback would be worse than
+> not deploying it. See "Session 22b" below.
+>
+> Superseded: **Session 23 — the production-like vertical slice.**
 > **Blocked on Omar**: it needs a real Google account/OAuth client and a
 > hosting decision, neither of which an agent can create. Session 24
 > (write-action threat model) is design-only and *is* unblocked if you
@@ -1893,6 +1901,69 @@ Start here; none of it is blocked.
 7. **Stop asserting that 93% memory occupancy caused the latency.** It is a
    plausible inference, not a measured fact. Either demonstrate it with
    Ollama's timing fields or state it as a hypothesis.
+
+### Session 22b — act on the external review (2026-08-15)
+
+**Decided by Omar as the next IDent work.** An external review of `main`
+at `f268e647` (CI passing, dependency audit clean) returned a blunt
+verdict: **keep IDent local/private.** The immediate blockers it named are
+CORS, rate limiting, encryption-key enforcement, and the missing
+production foundation.
+
+That verdict is accepted rather than argued with. It also reframes session
+23: a production-like slice should not be attempted until items 1–3 below
+are done, because deploying a service with no rate limiting and a
+committed encryption-key fallback is worse than not deploying it.
+
+**Do first — these three are small, specific, and gate everything else:**
+
+1. **CORS excludes `DELETE`** (`app.ts` ~L50–59). Allowed methods are
+   `GET`, `HEAD`, `POST`, `PUT`, so an authenticated browser deletion
+   fails. A correctness bug with a one-line fix and no reason to sit
+   behind anything.
+2. **No rate limiting, anywhere.** Registration, login, recovery,
+   elevation, WebAuthn verification, notification ingest, sync, and
+   assistant requests are all unthrottled. Argon2 makes login a resource
+   exhaustion vector as well as a guessing one — the same finding was
+   raised against Receiptless, so treat it as a shared gap and pick one
+   approach for both.
+3. **Committed OAuth encryption-key fallback** (`comms-config.ts`
+   ~L64–87). Production must **fail closed** when
+   `COMMS_TOKEN_ENCRYPTION_KEY` is missing, invalid, or equal to the
+   public development key. Receiptless already does exactly this and the
+   gate was observed firing in production on 2026-08-15 — port that
+   behaviour rather than inventing a second design.
+
+**Then, and only then:**
+
+4. **Production foundation** (review #4) — hosting, secrets, monitoring,
+   centralised logs, backups, restore testing, migration releases,
+   readiness validation, rollback rehearsal. Receiptless has now done all
+   of this once; reuse the shape, including `verify-deployment.mjs` and
+   the rollback rehearsal method.
+5. **The live vertical slice** (review #5) — real Google OAuth, Gmail and
+   calendar sync, inbox display, a grounded assistant answer. This is
+   session 23, now explicitly gated on 1–3.
+6. **Egress claims are not technically enforced** (review #6). This
+   sharpens session 22's own stated limitation: DNS classification is
+   point-in-time, and redirects or rebinding can invalidate the sentence
+   the UI shows. **Either enforce the destination — pin the resolved
+   address, refuse redirects — or weaken the wording to match what is
+   actually guaranteed.** Session 22 documented the gap honestly; the
+   review's point is that documenting it is not the same as the UI
+   telling the truth.
+7. **Prompt injection** (review #7) — agrees with session 22's own
+   finding: contained today only because the assistant is read-only, and a
+   hard blocker before any assistant-generated write. Session 24 is that
+   design work.
+8. **Onboarding and account UI unfinished** (review #8) — `/`, `/login`,
+   `/register`, `/account` have no styling at all, exactly as recorded in
+   session 22's click-through. Independent confirmation that it reads as
+   unfinished to someone else.
+
+**Verdict to carry forward:** IDent stays local/private until at least
+1–4 are done. That is not a setback — it is the same conclusion session 22
+was heading toward, stated by someone with no investment in the answer.
 
 ### Session 23 — one production-like vertical slice (needs Omar's accounts)
 
