@@ -3,27 +3,10 @@ import {
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_LOCAL_BASE_URL,
   DEFAULT_LOCAL_MODEL,
-  isLoopbackUrl,
   resolveAssistantProvider,
 } from "./assistant-config.js";
 
 const env = (values: Record<string, string>) => values as unknown as NodeJS.ProcessEnv;
-
-describe("isLoopbackUrl", () => {
-  it("recognises the loopback forms", () => {
-    for (const url of ["http://localhost:11434/v1", "http://127.0.0.1:8000/v1", "http://[::1]:11434/v1"]) {
-      expect(isLoopbackUrl(url)).toBe(true);
-    }
-  });
-
-  it("treats a LAN address as off-machine", () => {
-    // "not the public internet" is not the same claim as "not off this
-    // machine", and the disclosure must not blur the two.
-    expect(isLoopbackUrl("http://192.168.1.50:11434/v1")).toBe(false);
-    expect(isLoopbackUrl("https://api.example.com/v1")).toBe(false);
-    expect(isLoopbackUrl("not-a-url")).toBe(false);
-  });
-});
 
 describe("resolveAssistantProvider", () => {
   it("is unavailable when nothing is configured", () => {
@@ -39,14 +22,18 @@ describe("resolveAssistantProvider", () => {
       destination: "Anthropic",
       leavesMachine: true,
     });
+    expect(provider?.egress.tier).toBe("public_internet");
   });
 
   it("uses a local model when only a base URL is present", () => {
     const provider = resolveAssistantProvider(env({ ASSISTANT_BASE_URL: DEFAULT_LOCAL_BASE_URL }));
     expect(provider).toMatchObject({ id: "openai_compatible", model: DEFAULT_LOCAL_MODEL, leavesMachine: false });
-    // Measured, not assumed — see the constant's note.
+    // Measured, not assumed — see the constant's note and
+    // docs/benchmarks/local-model-2026-08-14.md.
     expect(DEFAULT_LOCAL_MODEL).toBe("llama3.2:3b");
-    expect(provider?.destination).toContain("this machine");
+    expect(provider?.destination).toBe(DEFAULT_LOCAL_BASE_URL);
+    // The tier, not a boolean, is what the disclosure reads.
+    expect(provider?.egress.tier).toBe("loopback");
   });
 
   it("lets an explicit provider override an inferred one", () => {
@@ -64,6 +51,10 @@ describe("resolveAssistantProvider", () => {
     );
     expect(provider?.leavesMachine).toBe(true);
     expect(provider?.destination).toBe("https://api.deepseek.com/v1");
+    // A hostname cannot be classified without DNS, and provider resolution
+    // does no I/O — so it says `unknown` rather than guessing. The status
+    // route resolves it before anything is shown to the user.
+    expect(provider?.egress.tier).toBe("unknown");
   });
 
   it("is unavailable when Anthropic is asked for without a key", () => {

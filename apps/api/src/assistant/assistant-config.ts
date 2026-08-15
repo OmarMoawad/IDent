@@ -20,6 +20,8 @@
  * mode" a configuration change rather than a rewrite, and it is why
  * SECURITY.md can now describe local mode as built rather than promised.
  */
+import { classifyUrlSync, publicEndpoint, type EgressAssessment } from "./egress.js";
+
 export type AssistantProviderId = "anthropic" | "openai_compatible";
 
 export type AssistantProvider = {
@@ -30,10 +32,22 @@ export type AssistantProvider = {
   /** Shown to the user before they ask anything. */
   destination: string;
   /**
-   * Whether a question and its retrieved context leave this machine.
-   * Derived from the resolved base URL rather than assumed from the
-   * provider id — someone can point the OpenAI-compatible client at a
-   * remote host, and the disclosure must tell the truth in that case too.
+   * Where the request actually goes, as a named tier rather than a
+   * boolean — see egress.ts. Derived from the resolved base URL rather
+   * than assumed from the provider id, because someone can point the
+   * OpenAI-compatible client at a remote host and the disclosure must
+   * tell the truth in that case too.
+   *
+   * This is the synchronous classification: literal addresses and the
+   * reserved loopback names only. A hostname that needs DNS reads
+   * `unknown` here; the status route re-classifies with `classifyUrl`.
+   */
+  egress: EgressAssessment;
+  /**
+   * Convenience mirror of `egress.leavesMachine`. Kept because callers and
+   * the live test read it, but `egress.tier` is the source of truth — the
+   * difference between a LAN peer and a hosted API is exactly what a
+   * boolean cannot say.
    */
   leavesMachine: boolean;
 };
@@ -42,41 +56,53 @@ export type AssistantProvider = {
 export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
 /**
  * A small instruction-following model is the right size for grounded Q&A
- * over ~12 retrieved items, and the default is set from measurement rather
- * than instinct.
+ * over ~12 retrieved items, and the default is set from measurement.
  *
- * Measured on one configuration: M1, 8 GB **unified memory** (Apple
- * Silicon has no separate VRAM), ~5.3 GiB reported available to the Ollama
- * runtime, Ollama 0.32.9, both models Q4_K_M. A single cold run of a
- * three-token reply took 39s on `llama3.1:8b` (4.92 GB) versus 4.1s on
- * `llama3.2:3b` (2.02 GB), and the live suite timed out on the former and
- * passed 3/3 on the latter.
+ * Re-measured in session 22 under a documented, reproducible method —
+ * `scripts/benchmark-local-model.mjs`, written up in
+ * `docs/benchmarks/local-model-2026-08-14.md`. Session 21's "39 s versus
+ * 4.1 s" is superseded: those were single undocumented cold wall-clock
+ * runs, and they are not comparable to anything.
  *
- * Two caveats worth keeping, both raised in review: a three-token reply is
- * not a capacity benchmark, and while the 8B occupying ~93% of available
- * memory is a plausible explanation for the latency, it is an inference
- * from wall-clock rather than a measurement. Ollama returns per-phase
- * timing fields; session 22 is to rerun under a documented method using
- * them.
+ * On one configuration (MacBookAir10,1, Apple M1, 8 GiB **unified
+ * memory** — Apple Silicon has no separate VRAM pool; macOS 15.7.9,
+ * Ollama 0.32.9, both models Q4_K_M), median of five warm runs:
  *
- * Bigger is available via ASSISTANT_MODEL on hardware that can hold it.
+ *   llama3.2:3b (`a80c4f17acd5`, 1.88 GiB)  0.72 s total, 26.49 tok/s
+ *   llama3.1:8b (`46e0c10c039e`, 4.58 GiB)  67.47 s total, 0.09 tok/s
+ *
+ * Both answered correctly on 5/5 runs, so the small default costs nothing
+ * in accuracy here — it is 94x faster on the same question.
+ *
+ * Why, now measured rather than guessed: a single 8B generation drove
+ * 458 944 page swap-outs and 340 255 swap-ins and grew swap by 1.8 GiB,
+ * while the 3B doing identical work swapped out nothing. The 8B does not
+ * fit in this machine's memory and faults its weights off disk on every
+ * forward pass. Session 21 asserted memory pressure as the cause from
+ * wall-clock alone; that inference happened to be right, and is now
+ * backed by the paging counters rather than by intuition.
+ *
+ * Bigger is available via ASSISTANT_MODEL on hardware that can hold it —
+ * and "can hold it" is the operative test, not core count.
  */
 export const DEFAULT_LOCAL_MODEL = "llama3.2:3b";
 export const DEFAULT_LOCAL_BASE_URL = "http://localhost:11434/v1";
 
 /**
- * Loopback means the request never leaves the host. Anything else does,
- * including a LAN address — "not the public internet" is not the same
- * claim as "not off this machine", and the disclosure should not blur it.
+ * Where the Anthropic SDK sends requests. Named here so the hosted path
+ * gets a real egress classification instead of a hardcoded `true` — the
+ * tier should come from the same machinery in both branches, or the two
+ * disclosures drift.
  */
-export function isLoopbackUrl(raw: string): boolean {
-  try {
-    const { hostname } = new URL(raw);
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
-  } catch {
-    return false;
-  }
-}
+export const ANTHROPIC_API_ORIGIN = "https://api.anthropic.com";
+
+/**
+ * Session 21's `isLoopbackUrl` was removed in session 22. It answered "is
+ * this exactly localhost?", which is not the question the disclosure asks:
+ * a LAN box, a VPN peer and a hosted API all returned `false` and were
+ * shown to the user identically. Use `classifyUrlSync` / `classifyUrl`
+ * from egress.ts and read `tier`.
+ */
 
 /**
  * Resolves the provider from the environment. Returns null when nothing is
@@ -99,15 +125,16 @@ export function resolveAssistantProvider(env: NodeJS.ProcessEnv = process.env): 
 
   if (wantsLocal) {
     const resolvedUrl = baseUrl ?? DEFAULT_LOCAL_BASE_URL;
-    const loopback = isLoopbackUrl(resolvedUrl);
+    const egress = classifyUrlSync(resolvedUrl, env);
     return {
       id: "openai_compatible",
       model: env.ASSISTANT_MODEL?.trim() || DEFAULT_LOCAL_MODEL,
       baseUrl: resolvedUrl,
       // Ollama needs no key; a hosted OpenAI-compatible endpoint will.
       apiKey: env.ASSISTANT_API_KEY?.trim() || null,
-      destination: loopback ? `a model running on this machine (${resolvedUrl})` : resolvedUrl,
-      leavesMachine: !loopback,
+      destination: resolvedUrl,
+      egress,
+      leavesMachine: egress.leavesMachine,
     };
   }
 
@@ -120,6 +147,7 @@ export function resolveAssistantProvider(env: NodeJS.ProcessEnv = process.env): 
       baseUrl: null,
       apiKey: anthropicKey,
       destination: "Anthropic",
+      egress: publicEndpoint(ANTHROPIC_API_ORIGIN, "Anthropic's hosted API."),
       leavesMachine: true,
     };
   }
