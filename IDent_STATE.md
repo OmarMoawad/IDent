@@ -5,13 +5,35 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-> **Next action: Session 23 — the production-like vertical slice, which
+> **Next action: Session 23 — the production-like vertical slice. Every
+> part of it that an agent can do is done; what remains needs Omar.**
+> Sessions 22b and 22c are **done, 2026-08-16**. 22b closed the three
+> gating items (CORS, rate limiting, encryption-key enforcement). 22c
+> closed everything else in the review that does not require an account
+> or a hosting decision: the egress claim is now **enforced** rather than
+> asserted (#6), the onboarding pages are designed (#8), the write-action
+> threat model is written (session 24, brought forward), and the
+> production foundation exists as far as it can without a host (#4) —
+> readiness reporting, a deployment verifier, a migration-safety gate,
+> and DEPLOYMENT.md.
+>
+> **What is left needs Omar, and it is a short list:** choose where the
+> API, the web app and Postgres run; register a domain (WebAuthn binds
+> credentials to it, so changing it later invalidates every passkey);
+> create a real Google OAuth client; then run
+> `node scripts/verify-deployment.mjs <url>` and rehearse a rollback and
+> a restore. DEPLOYMENT.md §1 is the decision table and §8 is the honest
+> list of what is still missing.
+>
+> **The review's verdict has still not been overturned.** It said keep
+> IDent local/private until items 1–4 are done, and item 4 is not done —
+> nothing is deployed, nothing is monitored, nothing is backed up. What
+> changed is that none of that is now waiting on engineering.
+>
+> Superseded: **Session 23 — the production-like vertical slice, which
 > is now unblocked on this side and still blocked on Omar's.** Session
 > 22b is **done, 2026-08-16**: all three gating items — CORS, rate
-> limiting, encryption-key enforcement — are implemented and tested. What
-> still needs Omar is unchanged: a real Google account/OAuth client, and
-> a hosting decision. Session 24 (write-action threat model) is
-> design-only and is the thing to do instead of waiting.
+> limiting, encryption-key enforcement — are implemented and tested.
 >
 > **The review's verdict has not been overturned, only narrowed.** It
 > said keep IDent local/private until items 1–4 are done, and item 4 —
@@ -1989,8 +2011,56 @@ regression).
    resolving the key lazily so the throw cannot take down `/health`, the
    endpoint whose job is to report the misconfiguration.
 
-**What this session did not touch:** items 4 and 5 below. No production
-foundation exists, and no live vertical slice has been attempted.
+**What session 22b did not touch:** items 4 and 5 below. Session 22c
+then took item 4 as far as it goes without a hosting decision — see
+"Session 22c" below.
+
+### Session 22c — the rest of the review (2026-08-16)
+
+Everything the review raised that does not need an account, a purchase,
+or a hosting decision.
+
+- **#6, egress claims not enforced — now enforced.** Session 22 showed
+  the user a sentence about where their data goes; nothing kept it true,
+  because `fetch` resolves DNS at a moment we do not control and follows
+  redirects by default. The OpenAI-compatible client now goes through
+  `assistant/pinned-request.ts`: the hostname resolves once, the tier is
+  computed from those addresses, and the socket is **pinned** to one of
+  them, so a later DNS change cannot move the connection. Redirects are
+  refused outright. The wording moved with the enforcement rather than
+  ahead of it — "Nothing leaves this machine" became "This request does
+  not leave this machine", and the remaining limit (pinning fixes the
+  address, not the identity of whatever listens on it) is now in the UI
+  instead of a module comment.
+- **#8, unstyled onboarding — designed.** `/`, `/login`, `/register`,
+  `/account` share `app/globals.css` plus one module. The cause was
+  structural: every styled page restated the same visual language in its
+  own module and there was no global stylesheet for the others to
+  inherit from. **Verified in a real browser**, including registering an
+  account and generating a recovery code — and the same click-through
+  confirmed 22b's CORS fix the only way it can be confirmed, by a real
+  preflight (DELETE now reaches the route and returns 401).
+- **Session 24 brought forward** — `docs/write-action-threat-model.md`.
+  Design only, unreviewed by anyone but its author, and written now
+  because the assistant's injection defence today is *structural* and
+  Phase 2 session 5 is what removes it.
+- **#4, production foundation — as far as it goes without a host.**
+  `/health` reports readiness rather than liveness (names, never values);
+  `scripts/verify-deployment.mjs` checks a deployment from outside, 7/7
+  against a local API; `npm run check:migrations` enforces additive
+  migrations in CI, and found three historical ones that would break a
+  rollback (allowlisted, each with its argument); `DEPLOYMENT.md` is the
+  runbook.
+
+**Also fixed: the argon2 test flake, properly.** `known-test-flakes`
+material for months — the auth tests exceeded vitest's 5s default under
+parallel load and passed in isolation. The default is now 15s, and the
+login-flood test 60s, with the measurement recorded: 21 failed logins
+cost this machine over 30 seconds of CPU. That number is the review's
+finding, not an inconvenience.
+
+**What 22c still did not touch:** item 5, the live vertical slice. It
+needs Omar.
 
 **Do first — these three are small, specific, and gate everything else:**
 
