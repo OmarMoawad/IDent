@@ -22,3 +22,4 @@ export function isDeployedEnvironment(env: NodeJS.ProcessEnv = process.env): boo
   if (explicit) return explicit !== "development" && explicit !== "test";
   return env.NODE_ENV === "production";
 }
+

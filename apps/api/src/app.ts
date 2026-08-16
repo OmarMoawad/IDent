@@ -14,6 +14,7 @@ import { registerIdentityRoutes } from "./identity/routes.js";
 import { registerWebauthnRoutes } from "./identity/webauthn-routes.js";
 import { ORIGIN } from "./identity/webauthn-config.js";
 import { registerRateLimiting } from "./rate-limit/plugin.js";
+import { readinessFrom } from "./readiness.js";
 
 /**
  * `loggerStream` exists so a test can assert on what actually reaches the
@@ -75,13 +76,20 @@ export function buildApp(options: { loggerStream?: { write(chunk: string): void 
   // and why the counter lives in Postgres.
   registerRateLimiting(app);
 
+  /**
+   * Liveness *and* readiness (session 22c, external review item 4). A
+   * service can be up and answering while missing the configuration that
+   * makes it safe to serve — WebAuthn still bound to localhost, no
+   * encryption key — and the old version of this endpoint reported "ok"
+   * for exactly that state.
+   *
+   * Reports configuration **names, never values**: it is unauthenticated
+   * by design, because an uptime probe cannot hold a credential.
+   */
   app.get("/health", async (): Promise<HealthStatus> => {
     const db = await checkDbHealth();
-    return {
-      status: db === "ok" ? "ok" : "degraded",
-      timestamp: new Date().toISOString(),
-      db,
-    };
+    const readiness = readinessFrom(db);
+    return { ...readiness, timestamp: new Date().toISOString() };
   });
 
   registerIdentityRoutes(app);

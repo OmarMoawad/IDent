@@ -2,7 +2,7 @@
   "name": "ident",
   "private": true,
   "version": "0.1.0",
-  "description": "IDent monorepo — see README.md and IDent_STATE.md before working here.",
+  "description": "IDent monorepo \u2014 see README.md and IDent_STATE.md before working here.",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -12,6 +12,7 @@
     "dev:web": "npm run dev -w apps/web",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "check:migrations": "node scripts/check-migration-safety.mjs",
     "typecheck": "npm run build -w packages/shared && npm run typecheck --workspaces --if-present",
     "db:generate": "npm run db:generate -w apps/api",
     "db:migrate": "npm run db:migrate -w apps/api"
