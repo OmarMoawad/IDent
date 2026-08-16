@@ -88,9 +88,20 @@ export function widest(tiers: readonly EgressTier[]): EgressTier {
   return tiers.reduce((worst, tier) => ((TIER_RANK.get(tier) ?? 5) > (TIER_RANK.get(worst) ?? 5) ? tier : worst));
 }
 
+/**
+ * Session 22c: this used to end "…pin the resolved address for the life
+ * of the connection if the tier must hold", which described a mitigation
+ * nobody had implemented. `pinned-request.ts` now implements it for the
+ * OpenAI-compatible provider — the one this disclosure is about — so the
+ * caveat states what is enforced and what is still only observed.
+ *
+ * The remaining limit is deliberately still here rather than dropped: a
+ * pinned address is not an attestation about who is listening on it.
+ */
 export const dnsRebindingCaveat =
-  "Classified at resolution time. DNS can change between this check and the request; " +
-  "pin the resolved address for the life of the connection if the tier must hold.";
+  "The hostname is resolved once, and the connection is pinned to that address for this request, " +
+  "so a DNS change cannot move it afterwards. Redirects are refused rather than followed. " +
+  "This fixes the address, not the identity of whatever is listening on it.";
 
 /**
  * RFC 6761 reserves `localhost` for loopback, and resolvers are required to
@@ -210,7 +221,13 @@ function statementFor(tier: EgressTier, origin: string, proxiedVia?: string): st
     case "same_process":
       return `Processed in this server's own process (${origin}). Nothing crosses a network interface.`;
     case "loopback":
-      return `Processed locally at ${origin}, on this machine's loopback interface. Nothing leaves this machine.`;
+      // "Nothing leaves this machine" was a flat claim about the future
+      // built on a point-in-time check (external review #6). The
+      // connection is now pinned to the classified address and redirects
+      // are refused, so the sentence is about this request and is true of
+      // it — which is a narrower promise than the old one, and one the
+      // code actually keeps.
+      return `Processed locally at ${origin}, on this machine's loopback interface. This request does not leave this machine.`;
     case "same_machine":
       return `Processed at ${origin} — this machine, but reached over a real network interface rather than loopback, so anything that can route to that address can reach it too.`;
     case "private_network":

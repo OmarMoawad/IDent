@@ -110,7 +110,7 @@ describe("AssistantClient", () => {
       destination: "http://localhost:11434/v1",
       egress: egress(
         "loopback",
-        "Processed locally at http://localhost:11434, on this machine's loopback interface. Nothing leaves this machine.",
+        "Processed locally at http://localhost:11434, on this machine's loopback interface. This request does not leave this machine.",
         "http://localhost:11434",
       ),
       leavesMachine: false,

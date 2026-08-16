@@ -200,7 +200,12 @@ describe("over HTTP", () => {
     }
 
     expect(last?.statusCode).toBe(429);
-  });
+    // Same argon2 cost as the per-IP case above, so the same generous
+    // timeout: nine failed logins is seconds of real CPU, and under a
+    // full parallel run this exceeded vitest's 5s default and failed
+    // while passing in isolation — which is the exact shape of flake this
+    // repo has already misdiagnosed twice.
+  }, 30_000);
 
   it("leaves /health alone however often it is polled", async () => {
     const remoteAddress = ip();
