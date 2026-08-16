@@ -56,7 +56,18 @@ export function buildApp(options: { loggerStream?: { write(chunk: string): void 
   // preflight for PUT /identity/recovery/wrap (curl and vitest's
   // app.inject() both bypass CORS entirely, so neither caught this — only
   // a real browser's preflight does).
-  app.register(cors, { origin: [ORIGIN], methods: ["GET", "HEAD", "POST", "PUT"] });
+  //
+  // DELETE was added in session 22b, for exactly the same reason and with
+  // exactly the same blind spot: two DELETE routes exist (a reminder, and
+  // a priority rule), both authenticated, both unreachable from a browser
+  // because the preflight was answered without their method. Every test
+  // passed the whole time. The list is enumerated from the routes that
+  // exist rather than widened to "all methods", so the next route with a
+  // new verb fails loudly here instead of quietly in a browser.
+  app.register(cors, {
+    origin: [ORIGIN],
+    methods: ["GET", "HEAD", "POST", "PUT", "DELETE"],
+  });
 
   app.get("/health", async (): Promise<HealthStatus> => {
     const db = await checkDbHealth();
