@@ -62,6 +62,31 @@ This list is intentionally unglamorous. It's also the entire mechanism by
 which a decade-scale roadmap stays compatible with Green-mode attention most
 of the time.
 
+## Running the API behind a proxy: `trustProxy` is not optional
+
+Rate limiting (session 22b, `apps/api/src/rate-limit/`) keys its IP-based
+buckets on `request.ip`, which Fastify reports as the **socket** address
+unless the server is built with `trustProxy`. Both settings are wrong in
+one of the two possible deployments, so this has to be a deliberate
+decision rather than a default:
+
+- **Behind a reverse proxy with `trustProxy` off**, every request appears
+  to come from the proxy. One noisy caller then throttles everyone, and
+  the limiter reports a flood that isn't there.
+- **Directly exposed with `trustProxy` on**, any caller can set
+  `X-Forwarded-For` themselves and get a fresh identity per request,
+  which makes every IP-keyed limit decorative.
+
+So: enable it when, and only when, a proxy is in front of the API and
+that proxy overwrites the header. This is part of the production
+foundation (review item 4), which has not been built — recorded here so
+the decision is made when hosting is chosen rather than discovered
+afterwards.
+
+`RATE_LIMIT_ENFORCE` should not be set in a deployment. Enforcement is on
+by default everywhere except the test suite; `0`/`false` disables it, and
+that switch exists for a local experiment, never for a running service.
+
 ## Pricing as an operating constraint, not just a business decision
 
 See [BOOTSTRAP.md](BOOTSTRAP.md) for the actual tiers. The rule that matters
