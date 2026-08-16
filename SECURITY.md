@@ -365,6 +365,17 @@ construction** — there is no code path from a model response back into the
 database, so even a fully successful injection cannot send, edit, or
 delete anything.
 
+**That structural protection has an expiry date, and it is on the
+roadmap.** Phase 2 session 5 gives the assistant write actions, and the
+sentence above stops being true the day it lands — every injection vector
+that is an information problem today becomes an action problem. The
+design that has to be in place first is
+[docs/write-action-threat-model.md](docs/write-action-threat-model.md)
+(session 24, written 2026-08-16, **not implemented and not yet reviewed
+by anyone other than its author**). Its central rule: the model proposes
+a constrained intent and the *server* constructs the payload, so a
+smuggled recipient has nowhere to live.
+
 ### Importance filtering (session 19)
 
 ROADMAP.md requires this filter be negotiated rather than silent, and the
