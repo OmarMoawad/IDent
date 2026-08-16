@@ -24,11 +24,6 @@ function encryptionKey(): Buffer {
   return cachedKey;
 }
 
-/** Tests only — forces the next call to re-read the environment. */
-export function resetEncryptionKeyCacheForTests(): void {
-  cachedKey = null;
-}
-
 /**
  * Encrypts an OAuth token payload (see comms-config.ts) for storage in
  * connected_sources.encrypted_token_data. iv + authTag + ciphertext are

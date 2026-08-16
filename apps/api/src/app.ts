@@ -13,6 +13,7 @@ import { registerElevationRoutes } from "./identity/elevation-routes.js";
 import { registerIdentityRoutes } from "./identity/routes.js";
 import { registerWebauthnRoutes } from "./identity/webauthn-routes.js";
 import { ORIGIN } from "./identity/webauthn-config.js";
+import { registerRateLimiting } from "./rate-limit/plugin.js";
 
 /**
  * `loggerStream` exists so a test can assert on what actually reaches the
@@ -68,6 +69,11 @@ export function buildApp(options: { loggerStream?: { write(chunk: string): void 
     origin: [ORIGIN],
     methods: ["GET", "HEAD", "POST", "PUT", "DELETE"],
   });
+
+  // Before any route: session 22b, external-review item 2. One hook for
+  // the whole surface — see rate-limit/policy.ts for what each route gets
+  // and why the counter lives in Postgres.
+  registerRateLimiting(app);
 
   app.get("/health", async (): Promise<HealthStatus> => {
     const db = await checkDbHealth();

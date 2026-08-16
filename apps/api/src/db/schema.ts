@@ -616,3 +616,30 @@ export const notificationEndpoints = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
 );
+
+/**
+ * Fixed-window rate limit counters (session 22b, external-review item 2).
+ * One row per (bucket, subject) pair, reused for the life of that pair —
+ * see rate-limit/policy.ts for why the counter lives in Postgres rather
+ * than in process memory, and rate-limit/store.ts for the single atomic
+ * statement that increments it.
+ *
+ * Deliberately holds no identifying data beyond what it must: the subject
+ * is an IP, or a **hash** of a bearer token, never the token itself. A
+ * dump of this table is a list of counters, not a set of credentials.
+ */
+export const rateLimitCounters = pgTable(
+  "rate_limit_counters",
+  {
+    bucket: text("bucket").notNull(),
+    subject: text("subject").notNull(),
+    /** Start of the current window; moved forward only when it expires. */
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull().defaultNow(),
+    count: integer("count").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.bucket, table.subject] }),
+    // Supports the periodic prune, which deletes by age across all buckets.
+    index("rate_limit_counters_window_start_idx").on(table.windowStart),
+  ],
+);
