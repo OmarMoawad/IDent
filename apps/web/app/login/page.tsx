@@ -10,6 +10,7 @@ import { ApiError, apiGet, apiPost } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
 import { decodePrfEvalExtensions, prfOutputFromAssertion, unwrapAmkWithPrfOutput } from "../../lib/prf";
 import { normalizeRecoveryCode } from "../../lib/recovery-code";
+import styles from "../onboarding.module.css";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -148,9 +149,11 @@ export default function LoginPage() {
   }
 
   return (
-    <main>
+    <main className={styles.shell}>
+      <div className={styles.card}>
+      <p className={styles.eyebrow}>IDent</p>
       <h1>Log in</h1>
-      <form onSubmit={handlePasswordSubmit}>
+      <form className={styles.form} onSubmit={handlePasswordSubmit}>
         <label>
           Username
           <input
@@ -170,19 +173,21 @@ export default function LoginPage() {
             autoComplete="current-password"
           />
         </label>
-        {error && <p role="alert">{error}</p>}
+        {error && <p className={styles.error} role="alert">{error}</p>}
         <button type="submit" disabled={submitting}>
           {submitting ? "Logging in…" : "Log in with password"}
         </button>
       </form>
-      <button type="button" onClick={handlePasskeyLogin} disabled={passkeySubmitting}>
-        {passkeySubmitting ? "Waiting for passkey…" : "Log in with a passkey"}
-      </button>
-      <button type="button" onClick={() => setShowRecovery((value) => !value)}>
-        {showRecovery ? "Hide recovery code login" : "Lost your password and passkey? Use a recovery code"}
-      </button>
+      <div className={styles.actions}>
+        <button type="button" className={styles.secondary} onClick={handlePasskeyLogin} disabled={passkeySubmitting}>
+          {passkeySubmitting ? "Waiting for passkey…" : "Log in with a passkey"}
+        </button>
+        <button type="button" className={styles.secondary} onClick={() => setShowRecovery((value) => !value)}>
+          {showRecovery ? "Hide recovery code login" : "Lost your password and passkey? Use a recovery code"}
+        </button>
+      </div>
       {showRecovery && (
-        <form onSubmit={handleRecoverySubmit}>
+        <form className={styles.form} onSubmit={handleRecoverySubmit}>
           <label>
             Username
             <input
@@ -202,15 +207,16 @@ export default function LoginPage() {
               placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
             />
           </label>
-          {recoveryError && <p role="alert">{recoveryError}</p>}
+          {recoveryError && <p className={styles.error} role="alert">{recoveryError}</p>}
           <button type="submit" disabled={recoverySubmitting}>
             {recoverySubmitting ? "Logging in…" : "Log in with recovery code"}
           </button>
         </form>
       )}
-      <p>
+      <p className={styles.footerNote}>
         Need an account? <a href="/register">Register</a>
       </p>
+      </div>
     </main>
   );
 }

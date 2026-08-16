@@ -1,0 +1,103 @@
+/*
+ * Shared by `/`, `/login`, `/register` and `/account` — one module
+ * imported four times rather than four modules that agree today and drift
+ * next month. Session 22c, external review finding #8.
+ */
+.shell { min-height: 100vh; padding: 2rem 1.25rem 4rem; }
+
+.card {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: 1.75rem;
+  border: 1px solid var(--ident-line);
+  border-radius: 14px;
+  background: var(--ident-surface);
+}
+
+/* The account page shows more than a form, so it gets room. */
+.wide { max-width: 52rem; }
+
+.eyebrow {
+  margin: 0;
+  color: var(--ident-accent-soft);
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.card h1 { margin: .2rem 0 .75rem; font-size: clamp(1.8rem, 5vw, 2.6rem); }
+.card h2 { margin: 2rem 0 .5rem; font-size: 1.25rem; }
+.lede { margin: 0 0 1.5rem; color: var(--ident-muted); }
+
+.form { display: grid; gap: 1rem; margin: 0 0 1rem; }
+.form label, .field { display: grid; gap: .35rem; font-weight: 600; }
+
+.card input {
+  font: inherit;
+  font-weight: 400;
+  padding: .65rem .8rem;
+  border: 1px solid #8f9b94;
+  border-radius: 10px;
+  background: var(--ident-surface);
+  color: inherit;
+}
+
+.card button {
+  font: inherit;
+  cursor: pointer;
+  padding: .65rem 1.1rem;
+  border: 1px solid var(--ident-accent);
+  border-radius: 999px;
+  background: var(--ident-accent);
+  color: white;
+}
+
+/*
+ * Secondary actions — "log in with a passkey", "use a recovery code" —
+ * are alternatives, not the main path. Same size and shape so they stay
+ * obviously clickable; quieter fill so the primary action is still the
+ * one the eye lands on.
+ */
+.card .secondary { background: transparent; color: var(--ident-accent); }
+.card button:disabled { cursor: wait; opacity: .6; }
+
+.actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .25rem; }
+
+.hint { margin: 0; color: var(--ident-muted); font-size: .85rem; font-weight: 400; }
+
+.error, .status {
+  margin: 0;
+  padding: .7rem .9rem;
+  border-radius: 10px;
+  font-size: .9rem;
+}
+.error { background: var(--ident-danger-bg); color: var(--ident-danger-ink); }
+.status { background: var(--ident-ok-bg); color: var(--ident-ok-ink); }
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1.25rem; margin: 0 0 1.5rem; }
+.facts dt { color: var(--ident-muted); font-size: .85rem; }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+
+/*
+ * A recovery code is the only way back into an account. It is set large
+ * and monospaced because it exists to be copied down correctly, and a
+ * transcription error here is an account nobody can reach.
+ */
+.code {
+  display: block;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px dashed var(--ident-accent-soft);
+  border-radius: 10px;
+  background: #f7faf8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.15rem;
+  letter-spacing: .06em;
+  overflow-wrap: anywhere;
+}
+
+.divider { margin: 1.5rem 0; border: 0; border-top: 1px solid var(--ident-line); }
+.footerNote { margin: 1.5rem 0 0; color: var(--ident-muted); font-size: .9rem; }
+
+.section { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--ident-line); }

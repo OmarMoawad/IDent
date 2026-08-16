@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import "./globals.css";
 import { AuthProvider } from "../lib/auth-context";
 
 export const metadata = {

@@ -15,6 +15,7 @@ import {
   wrapAmkWithPrfOutput,
 } from "../../lib/prf";
 import { normalizeRecoveryCode } from "../../lib/recovery-code";
+import styles from "../onboarding.module.css";
 
 type PasswordlessResult = IdentitySession & { recoveryCode: string };
 
@@ -128,26 +129,37 @@ export default function RegisterPage() {
 
   if (pendingAuth && pendingRecoveryCode) {
     return (
-      <main>
-        <h1>Save your recovery code</h1>
-        <p>
-          This is the only way back into your account if you ever lose this device — there is no password to fall
-          back on. It will not be shown again.
-        </p>
-        <p>
-          <code>{pendingRecoveryCode}</code>
-        </p>
-        <button type="button" onClick={handleContinueToAccount}>
-          I&apos;ve saved it — continue
-        </button>
+      <main className={styles.shell}>
+        <div className={styles.card}>
+          <p className={styles.eyebrow}>IDent</p>
+          <h1>Save your recovery code</h1>
+          <p className={styles.lede}>
+            This is the only way back into your account if you ever lose this device — there is no password to fall
+            back on. It will not be shown again.
+          </p>
+          {/*
+            Set large and monospaced deliberately: this string exists to be
+            copied down by hand, and a transcription error here is an
+            account nobody can get back into.
+          */}
+          <code className={styles.code}>{pendingRecoveryCode}</code>
+          <button type="button" onClick={handleContinueToAccount}>
+            I&apos;ve saved it — continue
+          </button>
+        </div>
       </main>
     );
   }
 
   return (
-    <main>
+    <main className={styles.shell}>
+      <div className={styles.card}>
+      <p className={styles.eyebrow}>IDent</p>
       <h1>Create an account</h1>
-      <form onSubmit={handleSubmit}>
+      <p className={styles.lede}>
+        Pick a username and a password. No phone number, no email address.
+      </p>
+      <form className={styles.form} onSubmit={handleSubmit}>
         <label>
           Username
           <input
@@ -171,16 +183,18 @@ export default function RegisterPage() {
             autoComplete="new-password"
           />
         </label>
-        {error && <p role="alert">{error}</p>}
+        {error && <p className={styles.error} role="alert">{error}</p>}
         <button type="submit" disabled={submitting}>
           {submitting ? "Creating account…" : "Create account"}
         </button>
       </form>
-      <button type="button" onClick={() => setPasswordless((value) => !value)}>
-        {passwordless ? "Hide passwordless registration" : "Register with just a passkey, no password"}
-      </button>
+      <div className={styles.actions}>
+        <button type="button" className={styles.secondary} onClick={() => setPasswordless((value) => !value)}>
+          {passwordless ? "Hide passwordless registration" : "Register with just a passkey, no password"}
+        </button>
+      </div>
       {passwordless && (
-        <form onSubmit={handlePasswordlessSubmit}>
+        <form className={styles.form} onSubmit={handlePasswordlessSubmit}>
           <label>
             Username
             <input
@@ -193,15 +207,16 @@ export default function RegisterPage() {
               autoComplete="username"
             />
           </label>
-          {passwordlessError && <p role="alert">{passwordlessError}</p>}
+          {passwordlessError && <p className={styles.error} role="alert">{passwordlessError}</p>}
           <button type="submit" disabled={passwordlessSubmitting}>
             {passwordlessSubmitting ? "Waiting for passkey…" : "Create account with a passkey"}
           </button>
         </form>
       )}
-      <p>
+      <p className={styles.footerNote}>
         Already have an account? <a href="/login">Log in</a>
       </p>
+      </div>
     </main>
   );
 }
