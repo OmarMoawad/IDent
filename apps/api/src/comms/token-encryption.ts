@@ -1,13 +1,27 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { COMMS_TOKEN_ENCRYPTION_KEY_BASE64 } from "./comms-config.js";
+import { resolveTokenEncryptionKey } from "./comms-config.js";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12; // GCM's standard nonce size
 const AUTH_TAG_BYTES = 16;
 
-const key = Buffer.from(COMMS_TOKEN_ENCRYPTION_KEY_BASE64, "base64");
-if (key.length !== 32) {
-  throw new Error("COMMS_TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes (AES-256).");
+/**
+ * Resolved on first use rather than at import time. An import-time throw
+ * would take down every route in the process — including `/health`, the
+ * endpoint whose job is to *report* a misconfiguration — so a deployment
+ * missing its key would go dark instead of saying why. Receiptless's
+ * oauth-token-crypto.ts makes the same choice for the same reason; this
+ * is the port of it (session 22b, review item 3).
+ *
+ * Cached after the first successful resolution: the key does not change
+ * within a process, and re-deriving it per call would put a base64 decode
+ * on every message sync.
+ */
+let cachedKey: Buffer | null = null;
+
+function encryptionKey(): Buffer {
+  cachedKey ??= resolveTokenEncryptionKey();
+  return cachedKey;
 }
 
 /**
@@ -19,7 +33,7 @@ if (key.length !== 32) {
  */
 export function encryptTokenPayload(plaintext: string): string {
   const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(ALGORITHM, key, iv);
+  const cipher = createCipheriv(ALGORITHM, encryptionKey(), iv);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
   return Buffer.concat([iv, authTag, ciphertext]).toString("base64url");
@@ -53,7 +67,7 @@ export function decryptTokenPayload(packed: string): string {
   const ciphertext = buf.subarray(IV_BYTES + AUTH_TAG_BYTES);
 
   try {
-    const decipher = createDecipheriv(ALGORITHM, key, iv);
+    const decipher = createDecipheriv(ALGORITHM, encryptionKey(), iv);
     decipher.setAuthTag(authTag);
     const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
     return plaintext.toString("utf8");

@@ -2,6 +2,21 @@ export type HealthStatus = {
   status: "ok" | "degraded";
   timestamp: string;
   db: "ok" | "unreachable";
+  /**
+   * Session 22c: readiness, not just liveness. A deployment can be up,
+   * reachable and answering while missing the configuration that makes it
+   * safe to serve — WebAuthn still pointed at localhost, no encryption
+   * key — and "ok" would have said nothing about it.
+   *
+   * **Names only, never values.** This endpoint is unauthenticated by
+   * design (an uptime probe cannot hold a credential), so it may report
+   * that `COMMS_TOKEN_ENCRYPTION_KEY` is wrong and must never report what
+   * it is.
+   *
+   * Optional so an older client reading this type still compiles.
+   */
+  missingConfig?: string[];
+  insecureConfig?: string[];
 };
 
 /** The shape POST /identity/register, /login, and /webauthn/login/verify all return. */

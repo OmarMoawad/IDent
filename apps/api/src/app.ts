@@ -13,6 +13,8 @@ import { registerElevationRoutes } from "./identity/elevation-routes.js";
 import { registerIdentityRoutes } from "./identity/routes.js";
 import { registerWebauthnRoutes } from "./identity/webauthn-routes.js";
 import { ORIGIN } from "./identity/webauthn-config.js";
+import { registerRateLimiting } from "./rate-limit/plugin.js";
+import { readinessFrom } from "./readiness.js";
 
 /**
  * `loggerStream` exists so a test can assert on what actually reaches the
@@ -56,15 +58,38 @@ export function buildApp(options: { loggerStream?: { write(chunk: string): void 
   // preflight for PUT /identity/recovery/wrap (curl and vitest's
   // app.inject() both bypass CORS entirely, so neither caught this — only
   // a real browser's preflight does).
-  app.register(cors, { origin: [ORIGIN], methods: ["GET", "HEAD", "POST", "PUT"] });
+  //
+  // DELETE was added in session 22b, for exactly the same reason and with
+  // exactly the same blind spot: two DELETE routes exist (a reminder, and
+  // a priority rule), both authenticated, both unreachable from a browser
+  // because the preflight was answered without their method. Every test
+  // passed the whole time. The list is enumerated from the routes that
+  // exist rather than widened to "all methods", so the next route with a
+  // new verb fails loudly here instead of quietly in a browser.
+  app.register(cors, {
+    origin: [ORIGIN],
+    methods: ["GET", "HEAD", "POST", "PUT", "DELETE"],
+  });
 
+  // Before any route: session 22b, external-review item 2. One hook for
+  // the whole surface — see rate-limit/policy.ts for what each route gets
+  // and why the counter lives in Postgres.
+  registerRateLimiting(app);
+
+  /**
+   * Liveness *and* readiness (session 22c, external review item 4). A
+   * service can be up and answering while missing the configuration that
+   * makes it safe to serve — WebAuthn still bound to localhost, no
+   * encryption key — and the old version of this endpoint reported "ok"
+   * for exactly that state.
+   *
+   * Reports configuration **names, never values**: it is unauthenticated
+   * by design, because an uptime probe cannot hold a credential.
+   */
   app.get("/health", async (): Promise<HealthStatus> => {
     const db = await checkDbHealth();
-    return {
-      status: db === "ok" ? "ok" : "degraded",
-      timestamp: new Date().toISOString(),
-      db,
-    };
+    const readiness = readinessFrom(db);
+    return { ...readiness, timestamp: new Date().toISOString() };
   });
 
   registerIdentityRoutes(app);

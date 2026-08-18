@@ -41,6 +41,13 @@ jobs:
 
       - run: npm run db:migrate -w apps/api
 
+      # Rollback safety (session 22c). DEPLOYMENT.md's recovery procedure
+      # is "redeploy the last good build", which only works if the previous
+      # release's code still runs against the current schema — redeploying
+      # does not roll back a migration. Checked here so a destructive
+      # migration is caught at PR time rather than during an incident.
+      - run: npm run check:migrations
+
       - run: npm run test
 
       - run: npm run build

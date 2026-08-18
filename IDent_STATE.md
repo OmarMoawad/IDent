@@ -5,7 +5,44 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-> **Next action: Session 22b — act on the external review.** An external
+> **Next action: Session 23 — the production-like vertical slice. Every
+> part of it that an agent can do is done; what remains needs Omar.**
+> Sessions 22b and 22c are **done, 2026-08-16**. 22b closed the three
+> gating items (CORS, rate limiting, encryption-key enforcement). 22c
+> closed everything else in the review that does not require an account
+> or a hosting decision: the egress claim is now **enforced** rather than
+> asserted (#6), the onboarding pages are designed (#8), the write-action
+> threat model is written (session 24, brought forward), and the
+> production foundation exists as far as it can without a host (#4) —
+> readiness reporting, a deployment verifier, a migration-safety gate,
+> and DEPLOYMENT.md.
+>
+> **What is left needs Omar, and it is a short list:** choose where the
+> API, the web app and Postgres run; register a domain (WebAuthn binds
+> credentials to it, so changing it later invalidates every passkey);
+> create a real Google OAuth client; then run
+> `node scripts/verify-deployment.mjs <url>` and rehearse a rollback and
+> a restore. DEPLOYMENT.md §1 is the decision table and §8 is the honest
+> list of what is still missing.
+>
+> **The review's verdict has still not been overturned.** It said keep
+> IDent local/private until items 1–4 are done, and item 4 is not done —
+> nothing is deployed, nothing is monitored, nothing is backed up. What
+> changed is that none of that is now waiting on engineering.
+>
+> Superseded: **Session 23 — the production-like vertical slice, which
+> is now unblocked on this side and still blocked on Omar's.** Session
+> 22b is **done, 2026-08-16**: all three gating items — CORS, rate
+> limiting, encryption-key enforcement — are implemented and tested.
+>
+> **The review's verdict has not been overturned, only narrowed.** It
+> said keep IDent local/private until items 1–4 are done, and item 4 —
+> the production foundation, meaning hosting, secrets, monitoring,
+> centralised logs, backups, restore testing, migration releases,
+> readiness validation and a rehearsed rollback — has not been started.
+> Three of four is not four.
+>
+> Superseded: **Session 22b — act on the external review.** An external
 > review of `main` at `f268e647` returned the verdict **keep IDent
 > local/private**, naming CORS, rate limiting, encryption-key enforcement
 > and the missing production foundation as immediate blockers. Session 23
@@ -1915,6 +1952,116 @@ That verdict is accepted rather than argued with. It also reframes session
 are done, because deploying a service with no rate limiting and a
 committed encryption-key fallback is worse than not deploying it.
 
+**Outcome, 2026-08-16 — all three done.** 282 API tests (was 245) and 35
+web tests pass, workspace typecheck clean; run with `npm test`, which is
+what the workspaces' own configs use (a bare `npx vitest run` from the
+repo root picks up the web tests without their jsdom environment and
+fails 35 of them for that reason alone — a runner mistake, not a
+regression).
+
+1. **CORS.** DELETE added. The finding was better than it looked: two
+   authenticated DELETE routes existed and *neither* was reachable from
+   a browser, while every test passed, because `app.inject()` and curl
+   bypass CORS entirely. The new test asserts on the preflight response
+   itself, so it fails for the same reason a browser would; it was
+   checked by putting the old method list back and watching it fail.
+2. **Rate limiting.** A fixed-window counter in Postgres
+   (`apps/api/src/rate-limit/`), keyed by `(bucket, subject)` and
+   incremented by one atomic
+   `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`. Applied as **one
+   `preHandler` hook**, not per-route opt-in: the finding was that
+   nothing was limited, and an opt-in design reproduces that one
+   forgotten route at a time. Unlisted routes get a default limit, so a
+   route added later is throttled the day it is written.
+
+   **The design is shared with Receiptless**, as the review asked —
+   same bucket names, same limits, same 429 + `Retry-After`, same
+   statement (`src/lib/rate-limit/` there). Postgres rather than process
+   memory is Receiptless's constraint, not IDent's: it runs on Vercel,
+   where an in-memory counter would limit nothing. Taking its constraint
+   here was the price of one design instead of two.
+
+   Login is limited **per-username as well as per-IP**, which is what
+   actually stops credential stuffing. **The cost, recorded rather than
+   buried:** a third party can spend failures to lock a known username
+   out of *password* login for the window. It is per-window rather than
+   cumulative, and passkey login is a separate bucket, so an account
+   with a passkey always keeps a way in.
+
+   **Weaker than it looks, stated plainly:** enforcement is **off inside
+   the test suite** unless a test asks for it (`RATE_LIMIT_ENFORCE=1`),
+   because every test file shares one Postgres and one loopback address
+   — a suite-wide limit would make unrelated tests fail each other in
+   exactly the shape this repo has twice misdiagnosed as a regression.
+   The consequence is real: the ordinary route tests prove nothing about
+   throttling, and only `rate-limit.test.ts` drives the enforced path.
+   Also: `request.ip` is the socket address because Fastify's
+   `trustProxy` is off, so putting this behind a proxy means enabling it
+   — and enabling it without a proxy would let anyone forge
+   `X-Forwarded-For` and evade every IP limit. See OPERATIONS.md.
+
+   The measured version of the finding: 21 failed logins take **seconds
+   of real CPU**, because argon2 runs even for a username that does not
+   exist. That is the exhaustion vector, and it is why that test needs a
+   30-second timeout.
+3. **Encryption key.** `COMMS_TOKEN_ENCRYPTION_KEY` now fails closed off
+   local development — missing, blank, wrong-length, or explicitly set
+   to the committed dev key are all refusals. Ported from Receiptless's
+   `oauth-token-crypto.ts` rather than designed again, including
+   resolving the key lazily so the throw cannot take down `/health`, the
+   endpoint whose job is to report the misconfiguration.
+
+**What session 22b did not touch:** items 4 and 5 below. Session 22c
+then took item 4 as far as it goes without a hosting decision — see
+"Session 22c" below.
+
+### Session 22c — the rest of the review (2026-08-16)
+
+Everything the review raised that does not need an account, a purchase,
+or a hosting decision.
+
+- **#6, egress claims not enforced — now enforced.** Session 22 showed
+  the user a sentence about where their data goes; nothing kept it true,
+  because `fetch` resolves DNS at a moment we do not control and follows
+  redirects by default. The OpenAI-compatible client now goes through
+  `assistant/pinned-request.ts`: the hostname resolves once, the tier is
+  computed from those addresses, and the socket is **pinned** to one of
+  them, so a later DNS change cannot move the connection. Redirects are
+  refused outright. The wording moved with the enforcement rather than
+  ahead of it — "Nothing leaves this machine" became "This request does
+  not leave this machine", and the remaining limit (pinning fixes the
+  address, not the identity of whatever listens on it) is now in the UI
+  instead of a module comment.
+- **#8, unstyled onboarding — designed.** `/`, `/login`, `/register`,
+  `/account` share `app/globals.css` plus one module. The cause was
+  structural: every styled page restated the same visual language in its
+  own module and there was no global stylesheet for the others to
+  inherit from. **Verified in a real browser**, including registering an
+  account and generating a recovery code — and the same click-through
+  confirmed 22b's CORS fix the only way it can be confirmed, by a real
+  preflight (DELETE now reaches the route and returns 401).
+- **Session 24 brought forward** — `docs/write-action-threat-model.md`.
+  Design only, unreviewed by anyone but its author, and written now
+  because the assistant's injection defence today is *structural* and
+  Phase 2 session 5 is what removes it.
+- **#4, production foundation — as far as it goes without a host.**
+  `/health` reports readiness rather than liveness (names, never values);
+  `scripts/verify-deployment.mjs` checks a deployment from outside, 7/7
+  against a local API; `npm run check:migrations` enforces additive
+  migrations in CI, and found three historical ones that would break a
+  rollback (allowlisted, each with its argument); `DEPLOYMENT.md` is the
+  runbook.
+
+**Also fixed: the argon2 test flake, properly.** `known-test-flakes`
+material for months — the auth tests exceeded vitest's 5s default under
+parallel load and passed in isolation. The default is now 15s, and the
+login-flood test 60s, with the measurement recorded: 21 failed logins
+cost this machine over 30 seconds of CPU. That number is the review's
+finding, not an inconvenience.
+
+**What 22c still did not touch:** item 5, the live vertical slice. It
+needs Omar.
+
 **Do first — these three are small, specific, and gate everything else:**
 
 1. **CORS excludes `DELETE`** (`app.ts` ~L50–59). Allowed methods are
@@ -2271,13 +2418,18 @@ None yet — there is no staging or production target. Local-only: see
   (`comms/token-encryption.ts`) before ever reaching
   `connected_sources.encrypted_token_data`; `.env`'s real Google Cloud
   client ID/secret follow the same gitignored-never-committed rule as
-  everything else in that file, and `COMMS_TOKEN_ENCRYPTION_KEY` currently
-  falls back to a fixed dev-only key (same convention as
-  `identity/webauthn-config.ts`'s dev defaults) — set a real one before
-  the hard gate above is ever lifted.
+  everything else in that file, and `COMMS_TOKEN_ENCRYPTION_KEY` falls back
+  to a committed dev-only key **in local development only** — since
+  session 22b that fallback is refused outright in any deployed
+  environment, so a deployment cannot encrypt a real refresh token under
+  a public key by forgetting to configure it.
 - CORS (`@fastify/cors`) restricts the API to a single allowed origin
   (`identity/webauthn-config.ts`'s `ORIGIN`, defaulting to
-  `http://localhost:3000` in dev) — not `origin: true`/wildcard. There's
+  `http://localhost:3000` in dev) — not `origin: true`/wildcard. The
+  allowed **methods** are enumerated from the routes that exist, so a new
+  verb fails loudly in a preflight test rather than quietly in a browser;
+  session 22b added DELETE, which had been missing for as long as the two
+  DELETE routes had existed. There's
   no cookie-based session for CSRF to exploit (bearer tokens are sent
   explicitly by client code, never attached automatically by the browser),
   so CORS here is about which origins can *read* responses, not about

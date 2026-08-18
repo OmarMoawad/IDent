@@ -1,3 +1,5 @@
+import { isDeployedEnvironment } from "../deployment.js";
+
 // Dev/CI defaults only, same convention as identity/webauthn-config.ts —
 // GOOGLE_OAUTH_CLIENT_ID/SECRET have no sane default (they're real
 // per-project Google credentials, set in .env, never committed) and are
@@ -62,26 +64,59 @@ export const ACCESS_TOKEN_REFRESH_BUFFER_MS = 1000 * 60 * 2;
 export const GMAIL_SYNC_MAX_MESSAGES = 25;
 
 /**
- * Symmetric key for encrypting connected_sources.encrypted_token_data at
- * rest (AES-256-GCM — see token-encryption.ts). The dev-only fallback
- * below is a real, valid 32-byte key generated once for local dev/CI, the
- * same pattern db/pool.ts and identity/webauthn-config.ts already use for
- * their own dev defaults — this repo's hard gate (IDent_STATE.md) still
- * blocks any real account/token data from existing anywhere beyond local
- * dev, so a shared dev-only key here carries the same "no real secrets
- * yet" assumption everything else in local dev already relies on. Set
- * COMMS_TOKEN_ENCRYPTION_KEY to a real per-environment key (base64,
- * 32 bytes) before that gate is ever lifted.
+ * The local-dev key for `connected_sources.encrypted_token_data`
+ * (AES-256-GCM — see token-encryption.ts).
  *
- * `??` is deliberately not used here: .env.example ships this key blank
- * (`COMMS_TOKEN_ENCRYPTION_KEY=`), so DEVELOPMENT.md's own documented
- * setup step — `cp .env.example .env` — makes dotenv define it as an
- * empty string. `?? ` treats that as "set", the empty string decodes to
- * zero bytes, and token-encryption.ts throws at import time, so the API
- * refused to boot on a clean checkout. Found by the session 17
- * real-browser click-through; the same class of "env silently wrong,
- * only visible when actually running it" bug as the dotenv-path fix in
- * item 2.5. A blank value means "not configured", identical to unset.
+ * It is **committed, therefore public**, and exists only so a clean
+ * checkout boots and the connect flow works without configuration.
+ * It must never encrypt a real token: a Google refresh token is a
+ * long-lived credential to somebody's whole mailbox, and encrypting it
+ * under a key anyone can read from this repository is equivalent to
+ * storing it in plaintext.
  */
-export const COMMS_TOKEN_ENCRYPTION_KEY_BASE64 =
-  process.env.COMMS_TOKEN_ENCRYPTION_KEY?.trim() || "lsA98LvDoz3c0P6DI7UUa6vYkD4Py7LzFhlPT7+787U=";
+const DEV_ONLY_KEY_BASE64 = "lsA98LvDoz3c0P6DI7UUa6vYkD4Py7LzFhlPT7+787U=";
+
+export class InsecureEncryptionKeyError extends Error {
+  constructor() {
+    super(
+      "COMMS_TOKEN_ENCRYPTION_KEY must be set to a unique 32-byte base64 key in any deployed environment. " +
+        "The built-in development key is committed to this repository and must never encrypt real tokens.",
+    );
+    this.name = "InsecureEncryptionKeyError";
+  }
+}
+
+/**
+ * Session 22b, external-review item 3. Until this session the constant
+ * below simply fell back to the committed key everywhere, so a deployment
+ * that forgot `COMMS_TOKEN_ENCRYPTION_KEY` encrypted real refresh tokens
+ * under a public key and reported nothing at all. Now it **fails closed**
+ * off local development: missing, blank, wrong-length, or explicitly set
+ * to the public dev key are all refusals.
+ *
+ * `?.trim() ||` rather than `??` is deliberate and load-bearing:
+ * .env.example ships this key blank (`COMMS_TOKEN_ENCRYPTION_KEY=`), so
+ * DEVELOPMENT.md's own documented `cp .env.example .env` makes dotenv
+ * define it as an empty string. `??` treats that as "set", the empty
+ * string decodes to zero bytes, and the API refused to boot on a clean
+ * checkout — found by the session 17 real-browser click-through. A blank
+ * value means "not configured", identical to unset.
+ */
+export function resolveTokenEncryptionKey(env: NodeJS.ProcessEnv = process.env): Buffer {
+  const configured = env.COMMS_TOKEN_ENCRYPTION_KEY?.trim();
+
+  if (!configured) {
+    if (isDeployedEnvironment(env)) throw new InsecureEncryptionKeyError();
+    return Buffer.from(DEV_ONLY_KEY_BASE64, "base64");
+  }
+
+  const key = Buffer.from(configured, "base64");
+  if (key.length !== 32) {
+    throw new Error("COMMS_TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes (AES-256).");
+  }
+  // Setting the public dev key explicitly is the same hazard as omitting it.
+  if (isDeployedEnvironment(env) && key.equals(Buffer.from(DEV_ONLY_KEY_BASE64, "base64"))) {
+    throw new InsecureEncryptionKeyError();
+  }
+  return key;
+}

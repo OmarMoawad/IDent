@@ -44,3 +44,11 @@
 .disclosure { border-left: 3px solid #3f7d5a; padding-left: .6rem; }
 .disclosure[data-tier="same_machine"], .disclosure[data-tier="private_network"] { border-left-color: #b8860b; }
 .disclosure[data-tier="public_internet"], .disclosure[data-tier="unknown"] { border-left-color: #a4552e; }
+
+/*
+ * Session 22c — the limit of the claim above it. Smaller and quieter than
+ * the disclosure on purpose: it qualifies that sentence rather than
+ * competing with it, and a caveat set in the same weight as the promise
+ * reads as a second promise.
+ */
+.caveat { display: block; margin-top: .35rem; font-size: .8rem; opacity: .75; }
