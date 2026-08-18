@@ -133,7 +133,17 @@ export function AssistantClient() {
               {status.egress?.statement ?? "Where this is processed could not be established."}{" "}
               {status.egress && tierLeavesMachine(status.egress.tier)
                 ? `Your question and a small, relevant slice of your data are sent there (${status.model}) to generate an answer.`
-                : `Your question and your data stay on this machine (${status.model}).`}
+                : `Your question and your data stay on this machine (${status.model}).`}{" "}
+              {/*
+                Session 22c, external review #6. The sentence above used to
+                stand alone, which read as a permanent guarantee built on a
+                point-in-time DNS check. The destination is now pinned for
+                the request and redirects are refused, so the guarantee is
+                real — for this request — and the limit of it is stated
+                here rather than left in a module comment nobody using the
+                app will read.
+              */}
+              {status.egress?.caveat && <span className={styles.caveat}>{status.egress.caveat}</span>}
             </p>
           )}
         </div>

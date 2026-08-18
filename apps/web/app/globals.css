@@ -1,0 +1,53 @@
+/*
+ * Session 22c — external review finding #8: `/`, `/login`, `/register`
+ * and `/account` had no styling at all, which the session 22
+ * click-through had already recorded and the review then confirmed
+ * independently: they read as unfinished to someone else.
+ *
+ * These are the pages a person meets *first*. Every styled page in this
+ * app (inbox, contacts, calendar, assistant) already agreed on a visual
+ * language and each restated it in its own module; the four unstyled ones
+ * had no way to inherit it because there was no global stylesheet to
+ * inherit from. So the shared tokens live here now, applied to the whole
+ * document, and the onboarding pages get a small shared module on top.
+ *
+ * Deliberately not a rewrite of the existing pages: they set their own
+ * background on `.shell` and continue to win. This raises the floor
+ * without touching what already works.
+ */
+
+:root {
+  --ident-bg: #f4f1ea;
+  --ident-ink: #17211d;
+  --ident-muted: #506057;
+  --ident-line: #ccd4cd;
+  --ident-accent: #315c48;
+  --ident-accent-soft: #46705d;
+  --ident-focus: #c8883a;
+  --ident-surface: #ffffff;
+  --ident-danger-bg: #fee9e7;
+  --ident-danger-ink: #8b1f16;
+  --ident-ok-bg: #e4f4e9;
+  --ident-ok-ink: #24543b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ident-bg);
+  color: var(--ident-ink);
+  font-family: system-ui, sans-serif;
+  line-height: 1.55;
+}
+
+h1, h2, h3 { font-family: Georgia, serif; line-height: 1.2; }
+
+a { color: var(--ident-accent); }
+
+/*
+ * One focus style for the whole app rather than per-module. The inbox
+ * defines the same ring on `.shell`; this makes it true on the pages that
+ * have no shell — including any page added later, which is the point.
+ */
+:focus-visible { outline: 3px solid var(--ident-focus); outline-offset: 3px; }

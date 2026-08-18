@@ -4,6 +4,7 @@ import {
   type AssistantProvider,
 } from "./assistant-config.js";
 import type { AssistantAnswer, AssistantClient } from "./assistant-client.js";
+import { postJsonPinned } from "./pinned-request.js";
 
 /**
  * One implementation for backends exposing OpenAI's `/chat/completions`
@@ -17,9 +18,17 @@ import type { AssistantAnswer, AssistantClient } from "./assistant-client.js";
  * and each backend still needs verifying rather than assuming equivalence.
  * Only Ollama has been exercised so far.
  *
- * Written against raw fetch rather than pulling in a second SDK: the
- * request is four fields and the response is one, and a dependency whose
- * only job is to build that JSON would be more surface than it saves.
+ * Written against the raw HTTP layer rather than pulling in a second SDK:
+ * the request is four fields and the response is one, and a dependency
+ * whose only job is to build that JSON would be more surface than it
+ * saves.
+ *
+ * Session 22c: it goes through `postJsonPinned` rather than `fetch`,
+ * because this is the provider the "nothing leaves this machine"
+ * disclosure is *about*. `fetch` resolves DNS itself, at a moment we do
+ * not control, and follows redirects by default — so the sentence shown
+ * to the user described the destination we checked, not necessarily the
+ * one the bytes went to. External review finding #6.
  */
 type ChatCompletionResponse = {
   choices?: Array<{ message?: { content?: string | null }; finish_reason?: string }>;
@@ -30,13 +39,20 @@ export class OpenAICompatibleClient implements AssistantClient {
   constructor(private readonly provider: AssistantProvider) {}
 
   async ask({ question, context }: { question: string; context: string }): Promise<AssistantAnswer> {
-    const response = await fetch(`${this.provider.baseUrl}/chat/completions`, {
-      method: "POST",
+    const response = await postJsonPinned(`${this.provider.baseUrl}/chat/completions`, {
       headers: {
         "content-type": "application/json",
         // Ollama needs no key; a hosted endpoint does. Sent only when present.
         ...(this.provider.apiKey ? { authorization: `Bearer ${this.provider.apiKey}` } : {}),
       },
+      /**
+       * Any tier is permitted here: an operator who configures a hosted
+       * OpenAI-compatible endpoint has chosen that, and the disclosure's
+       * job is to *say* where it goes, not to overrule the choice. What
+       * pinning buys is that the sentence the user was shown describes
+       * the connection that actually happened.
+       */
+      allowance: { allowAny: true },
       body: JSON.stringify({
         model: this.provider.model,
         max_tokens: MAX_OUTPUT_TOKENS,
@@ -50,14 +66,22 @@ export class OpenAICompatibleClient implements AssistantClient {
       }),
     });
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       // Status only. The request body is the person's retrieved inbox, and
       // an error body can echo it back — the same reason the route logs
       // only an error class.
       throw new Error(`Assistant provider returned status ${response.status}`);
     }
 
-    const body = (await response.json().catch(() => null)) as ChatCompletionResponse | null;
+    let body: ChatCompletionResponse | null = null;
+    try {
+      body = JSON.parse(response.body) as ChatCompletionResponse;
+    } catch {
+      // Same reasoning as the status-only error above: an unparseable
+      // body is not worth quoting, because the request body was the
+      // person's retrieved inbox and an error page can echo it back.
+      body = null;
+    }
     const choice = body?.choices?.[0];
 
     // The OpenAI-compatible analogue of Anthropic's refusal stop reason.

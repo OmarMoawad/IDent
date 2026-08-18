@@ -18,6 +18,7 @@ import {
   wrapAmkWithPrfOutput,
 } from "../../lib/prf";
 import { normalizeRecoveryCode } from "../../lib/recovery-code";
+import styles from "../onboarding.module.css";
 
 export default function AccountPage() {
   const router = useRouter();
@@ -45,8 +46,10 @@ export default function AccountPage() {
 
   if (restoring) {
     return (
-      <main>
-        <p>Loading…</p>
+      <main className={styles.shell}>
+        <div className={styles.card}>
+          <p>Loading…</p>
+        </div>
       </main>
     );
   }
@@ -234,10 +237,12 @@ export default function AccountPage() {
   }
 
   return (
-    <main>
+    <main className={styles.shell}>
+      <div className={`${styles.card} ${styles.wide}`}>
+      <p className={styles.eyebrow}>IDent</p>
       <h1>Account</h1>
-      <p><Link href="/inbox">Open unified inbox</Link></p>
-      <dl>
+      <p className={styles.lede}><Link href="/inbox">Open unified inbox</Link></p>
+      <dl className={styles.facts}>
         <dt>Username</dt>
         <dd>{auth.username}</dd>
         <dt>Identity ID</dt>
@@ -246,7 +251,7 @@ export default function AccountPage() {
         <dd>{auth.amk ? "Loaded in memory" : "Locked — enter your password to unlock"}</dd>
       </dl>
       {!auth.amk && (
-        <form onSubmit={handleUnlock}>
+        <form className={styles.form} onSubmit={handleUnlock}>
           <label>
             Password
             <input
@@ -257,35 +262,41 @@ export default function AccountPage() {
               autoComplete="current-password"
             />
           </label>
-          {unlockError && <p role="alert">{unlockError}</p>}
-          <button type="submit" disabled={unlocking}>
-            {unlocking ? "Unlocking…" : "Unlock"}
-          </button>
-          <button type="button" onClick={handleUnlockWithPasskey} disabled={unlocking}>
-            {unlocking ? "Unlocking…" : "Unlock with passkey"}
-          </button>
+          {unlockError && <p className={styles.error} role="alert">{unlockError}</p>}
+          <div className={styles.actions}>
+            <button type="submit" disabled={unlocking}>
+              {unlocking ? "Unlocking…" : "Unlock"}
+            </button>
+            <button type="button" className={styles.secondary} onClick={handleUnlockWithPasskey} disabled={unlocking}>
+              {unlocking ? "Unlocking…" : "Unlock with passkey"}
+            </button>
+          </div>
         </form>
       )}
-      <button type="button" onClick={handleAddPasskey} disabled={passkeySubmitting}>
-        {passkeySubmitting ? "Registering passkey…" : "Register a passkey"}
-      </button>
-      {passkeyStatus && <p>{passkeyStatus}</p>}
-      <button type="button" onClick={handleGenerateRecoveryCode} disabled={recoverySubmitting}>
-        {recoverySubmitting ? "Generating…" : "Generate a recovery code"}
-      </button>
+      <div className={styles.actions}>
+        <button type="button" className={styles.secondary} onClick={handleAddPasskey} disabled={passkeySubmitting}>
+          {passkeySubmitting ? "Registering passkey…" : "Register a passkey"}
+        </button>
+        <button type="button" className={styles.secondary} onClick={handleGenerateRecoveryCode} disabled={recoverySubmitting}>
+          {recoverySubmitting ? "Generating…" : "Generate a recovery code"}
+        </button>
+      </div>
+      {passkeyStatus && <p className={styles.status}>{passkeyStatus}</p>}
       {recoveryCode && (
-        <p>
-          Your recovery code: <code>{recoveryCode}</code>
-        </p>
+        <>
+          <p className={styles.hint}>Your recovery code — write it down now, it is not shown again:</p>
+          <code className={styles.code}>{recoveryCode}</code>
+        </>
       )}
-      {recoveryStatus && <p>{recoveryStatus}</p>}
+      {recoveryStatus && <p className={styles.status}>{recoveryStatus}</p>}
 
+      <section className={styles.section}>
       <h2>Step-up verification</h2>
       <p>
         Some actions need proof it&apos;s still you, on top of being logged in. Re-enter your password to
         elevate this session for a few minutes.
       </p>
-      <dl>
+      <dl className={styles.facts}>
         <dt>Elevated</dt>
         <dd>
           {elevatedUntil && new Date(elevatedUntil).getTime() > Date.now()
@@ -293,7 +304,7 @@ export default function AccountPage() {
             : "No"}
         </dd>
       </dl>
-      <form onSubmit={handleElevate}>
+      <form className={styles.form} onSubmit={handleElevate}>
         <label>
           Password
           <input
@@ -304,20 +315,26 @@ export default function AccountPage() {
             autoComplete="current-password"
           />
         </label>
-        {elevateError && <p role="alert">{elevateError}</p>}
+        {elevateError && <p className={styles.error} role="alert">{elevateError}</p>}
         <button type="submit" disabled={elevating}>
           {elevating ? "Verifying…" : "Elevate session"}
         </button>
       </form>
-      <button type="button" onClick={handleViewDemoSecret} disabled={demoLoading}>
-        {demoLoading ? "Loading…" : "View protected demo data"}
-      </button>
-      {demoResult && <p>{demoResult}</p>}
-      {demoError && <p role="alert">{demoError}</p>}
+      <div className={styles.actions}>
+        <button type="button" className={styles.secondary} onClick={handleViewDemoSecret} disabled={demoLoading}>
+          {demoLoading ? "Loading…" : "View protected demo data"}
+        </button>
+      </div>
+      {demoResult && <p className={styles.status}>{demoResult}</p>}
+      {demoError && <p className={styles.error} role="alert">{demoError}</p>}
+      </section>
 
-      <button type="button" onClick={handleLogout} disabled={loggingOut}>
-        {loggingOut ? "Logging out…" : "Log out"}
-      </button>
+      <section className={styles.section}>
+        <button type="button" className={styles.secondary} onClick={handleLogout} disabled={loggingOut}>
+          {loggingOut ? "Logging out…" : "Log out"}
+        </button>
+      </section>
+      </div>
     </main>
   );
 }

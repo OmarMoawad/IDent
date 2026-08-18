@@ -177,14 +177,19 @@ describe("over HTTP", () => {
     // account exists.
     expect(last?.json()).toEqual({ error: "Too many requests. Try again later." });
     /**
-     * The generous timeout is the finding, not an inconvenience: 21 failed
-     * logins take seconds of real CPU here because argon2 runs even for a
-     * username that does not exist (deliberately — otherwise the response
-     * time itself would say whether an account exists). That is precisely
-     * the exhaustion vector the review named, and this test is what now
-     * bounds it.
+     * The very generous timeout is the finding, not an inconvenience: 21
+     * failed logins take **tens of seconds** of real CPU here, because
+     * argon2 runs even for a username that does not exist (deliberately —
+     * otherwise the response time itself would say whether an account
+     * exists). Measured on this machine under a full parallel run: over
+     * 30 seconds, which is why this number is 60 and not 30.
+     *
+     * Read that again as an attacker would. Twenty-one requests, costing
+     * the sender nothing, cost the server half a minute of CPU. That is
+     * exactly the exhaustion vector the review named, and this test is
+     * what now bounds it.
      */
-  }, 30_000);
+  }, 60_000);
 
   it("throttles one username across many IPs — the credential-stuffing shape", async () => {
     const username = `target-${randomUUID()}`;
@@ -200,7 +205,12 @@ describe("over HTTP", () => {
     }
 
     expect(last?.statusCode).toBe(429);
-  });
+    // Same argon2 cost as the per-IP case above, so the same generous
+    // timeout: nine failed logins is seconds of real CPU, and under a
+    // full parallel run this exceeded vitest's 5s default and failed
+    // while passing in isolation — which is the exact shape of flake this
+    // repo has already misdiagnosed twice.
+  }, 30_000);
 
   it("leaves /health alone however often it is polled", async () => {
     const remoteAddress = ip();

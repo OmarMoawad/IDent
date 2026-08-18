@@ -112,7 +112,7 @@ describe("classifyUrlSync", () => {
     // Item 4: the disclosure asserts where processing happens rather than
     // merely omitting a warning.
     expect(result.statement).toContain("Processed locally at http://localhost:11434");
-    expect(result.statement).toContain("Nothing leaves this machine");
+    expect(result.statement).toContain("This request does not leave this machine");
   });
 
   it("classifies a LAN literal as private_network, not as generic egress", () => {
