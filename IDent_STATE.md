@@ -21,6 +21,37 @@ see [OPERATIONS.md](OPERATIONS.md).
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
+> **Session 23 review, 2026-08-21 — three corrections before the PR.**
+> Reviewing the closed session against the repo rather than against its own
+> notes turned up one live risk, one leak the fix had missed, and one
+> number that does not add up:
+>
+> 1. **Production is served from this feature branch**, not `main`
+>    (DEPLOYMENT.md §2). Merging and deleting it — the normal end of a
+>    session here — pulls the ref Railway builds from. Repoint to `main`
+>    *before* merging. **Needs Omar.**
+> 2. **The callback redaction covered one door of two.** It was anchored to
+>    the literal `gmail` path, so the next connector would have leaked its
+>    authorization code on day one; and Fastify's default not-found handler
+>    builds its message from the raw URL and logs it, so a callback arriving
+>    at an unrouted path — a redirect URI typed wrong in a provider console,
+>    a renamed route — wrote a live code into the log and echoed it back to
+>    the browser, through a door the serializer never saw. Both are fixed
+>    and both are now covered by tests.
+> 3. **The backup restored zero identities while `omartest` existed.**
+>    Unreconciled; see DEPLOYMENT.md §6. **Needs Omar.**
+>
+> The progress badge was also a session behind: Session 23 closed without
+> `generate-progress-svg.mjs` being bumped, so it read 21% for work that
+> puts the phase at 5/12.
+>
+> One wording note, since this file is the resumability contract: "the full
+> test suite passed" is **329 API tests passed and 3 skipped**, plus 35 web
+> tests. The three are `assistant-live.test.ts`, gated behind
+> `skipIf(!hasProvider)` — they need a real provider key, so the live
+> assistant path has never run in CI. That is a deliberate design, not a
+> failure, but it is not the same thing as everything having run.
+>
 > **Session 23 completed on 2026-08-21 — the production-like gate is closed.**
 > `ident.best` was purchased from Spaceship on 2026-08-20 for one year,
 > expiring/renewing on 2027-08-20. The final first-year charge was EGP
@@ -77,9 +108,13 @@ see [OPERATIONS.md](OPERATIONS.md).
 > custom-format Neon dump was validated, uploaded to a private folder in
 > Omar's personal Google Drive, and restored into an isolated Postgres 18
 > container. The rehearsal recovered 22 user tables (21 application tables
-> plus Drizzle migrations), all 18 migration records, and the expected zero
-> identities and health rows; the database restore itself took 0.14s. SHA-256
+> plus Drizzle migrations), all 18 migration records, and zero identity and
+> health rows; the database restore itself took 0.14s. SHA-256
 > is `684b3207ae4157da9a926c2a032e0925f30b7806ceaa3c8e44b20a4065443df8`.
+> **That zero does not reconcile with `omartest` registering against the
+> same production database earlier in this session — see DEPLOYMENT.md §6.
+> Until it is settled the rehearsal proves schema and migration history,
+> not data.**
 > Drive reports the archive as owned by Omar and “Private to you.” The
 > provisional targets are RPO 24 hours and RTO 30 minutes; daily automation
 > remains follow-up operational work.

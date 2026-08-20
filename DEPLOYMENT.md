@@ -16,6 +16,18 @@ Recorded 2026-08-20:
 - Railway project `alert-creativity`, service `@ident/api`, deploys branch
   `docs/schedule-ident-best`; generated URL
   `https://identapi-production.up.railway.app` passed `/health`.
+
+  > **Needs Omar, before that branch is merged.** Production is served
+  > from a feature branch, not `main`. Merging its PR and deleting the
+  > branch — the normal end of every session here — removes the ref
+  > Railway builds from, and the failure would show up as production
+  > going stale or failing its next deploy rather than as anything
+  > red in GitHub. **Repoint the Railway service to `main` first, confirm
+  > a deploy from `main` passes `/health`, and only then merge.**
+  > `main` is currently behind this branch by the whole of Session 23, so
+  > repointing before merging would also roll production backwards —
+  > which is why the order is repoint, merge, verify, and not any other
+  > sequence.
 - Neon project `ident` (`spring-fog-70776779`) is Postgres 18 in Frankfurt;
   the pooled URL is stored only as a masked Railway secret. The free plan's
   six-hour history is not the independent backup required by section 6.
@@ -41,8 +53,9 @@ Recorded 2026-08-20:
   `684b3207ae4157da9a926c2a032e0925f30b7806ceaa3c8e44b20a4065443df8`.
   A fresh restore into an isolated Postgres 18 container succeeded in 0.14s
   and recovered 22 user tables (21 application tables plus Drizzle's migration
-  table), all 18 migration records, and the expected zero identities/health
-  rows. Google Drive reports the archive as owned by Omar and “Private to you.”
+  table), all 18 migration records, and zero identity/health rows — a count
+  that section 6 flags as unreconciled, since `omartest` should have been in
+  that dump. Google Drive reports the archive as owned by Omar and “Private to you.”
 - The owner test identity `omartest` completed passkey registration/login and
   a real Google consent round trip. Enabling Gmail API and Google Calendar API
   in `ident-best-prod` resolved the first callback's expected API-disabled
@@ -174,10 +187,31 @@ The first independent backup and restore rehearsal completed on 2026-08-21.
 the archive was validated with `pg_restore --list`, uploaded outside Neon to a
 private personal Google Drive folder, and restored into an isolated local
 Postgres 18 container. The restored database contained 22 user tables, 18/18
-migration records, and the expected zero production identities. Restore time
+migration records, and zero identity and health rows. Restore time
 for the database operation was 0.14s; allow a provisional **RTO of 30 minutes**
 for archive retrieval, operator setup and verification. Until an automated
 schedule exists, the provisional **RPO is 24 hours** and requires a daily dump.
+
+> **Unresolved, and it weakens the claim above — needs Omar.** The zero
+> identity count does not agree with the rest of this session. The owner
+> test identity `omartest` completed passkey registration and a real
+> Google consent round trip against *this* production deployment, as
+> recorded in section 4 — so a dump of that database should have carried
+> one identity, not none. Either the dump was taken before `omartest`
+> existed, or it was taken from a different database than the API writes
+> to. Both are worth knowing, and the second is much worse.
+>
+> Until it is settled, **this rehearsal proves the schema and the
+> migration history round-trip, and nothing about data.** A restore
+> verified against an empty dataset cannot show that rows survive it,
+> which is the thing a backup exists to do.
+>
+> To settle it: `SELECT count(*) FROM identities;` against the production
+> connection string, compared with the same count inside a fresh restore
+> of a newly taken dump. If the counts agree and are non-zero, the gate is
+> genuinely closed and this note can be replaced with the numbers. If
+> production is non-zero and the archive is not, the archive is not a
+> backup of production and nothing else in this section holds.
 
 Archive evidence:
 
@@ -217,6 +251,15 @@ the same public health check. Use **60 seconds** as the measured recovery target
 for this deployment shape, and always restore forward after a rehearsal when
 the older snapshot intentionally lacks newer optional integration variables.
 
+**The known-good target drifts, and that is the part to watch.** The
+snapshot rehearsed against predates the OAuth variables, so rolling back to
+it today would restore a build that cannot complete a Google consent — it
+would pass `/health` and fail the feature. A rollback target is only good
+for the configuration it was captured with, so **after every variable
+change, the last known-good deployment is the one taken after that
+change**, not the one this rehearsal used. Re-establish it as part of
+changing a variable rather than discovering it mid-incident.
+
 ## 8. What is still missing, honestly
 
 Session 23's production-like gate is closed: hosting, masked provider secrets,
@@ -226,8 +269,21 @@ exercised and recorded.
 
 Remaining operational follow-up is explicit rather than part of that gate:
 
+- **Repoint the Railway service from `docs/schedule-ident-best` to `main`
+  before that branch is merged or deleted.** See section 2 — this is the one
+  follow-up that can take production down rather than merely leave it
+  unimproved.
 - Railway is still on a 30-day/$5 trial. Choose and authorize a paid plan before
   relying on it beyond the trial; this session did not authorize payment.
+- **Reconcile the backup's zero identity count with `omartest` existing in
+  production**, and re-dump if they disagree. See section 6.
+- Railway's log retention still holds the callback query strings written
+  *before* the redaction landed, so the authorization codes and state values
+  from the consent rehearsal are in that history. Both are single-use and
+  long expired, and the client secret they were issued against was rotated
+  and deleted the same session, so there is nothing live in them — recorded
+  because "we fixed the logging" and "the logs are clean" are different
+  claims, and only the first is true.
 - Railway retains/searches stdout logs, but no proactive uptime alert currently
   pages the owner. Add an external health monitor before onboarding anyone else.
 - Automate the daily independent dump required by the provisional 24-hour RPO.
