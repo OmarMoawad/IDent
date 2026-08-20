@@ -21,8 +21,11 @@ import { readinessFrom } from "./readiness.js";
  * log output — see notifications/log-redaction.test.ts. Production passes
  * nothing and gets Fastify's default destination.
  */
-export function buildApp(options: { loggerStream?: { write(chunk: string): void } } = {}): FastifyInstance {
+export function buildApp(
+  options: { loggerStream?: { write(chunk: string): void }; trustProxy?: boolean } = {},
+): FastifyInstance {
   const app = Fastify({
+    trustProxy: options.trustProxy ?? false,
     logger: {
       ...(options.loggerStream ? { stream: options.loggerStream } : {}),
       serializers: {
