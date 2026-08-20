@@ -1,7 +1,8 @@
 # Deploying IDent
 
-**Status: nothing is deployed.** Vercel (web), Railway (API) and Neon
-(Postgres) were selected on 2026-08-20, and `ident.best` was purchased from
+**Status: Session 23 deployment is live on provider and custom hostnames;
+the production gate is not closed.** Vercel (web), Railway
+(API) and Neon (Postgres) were selected on 2026-08-20, and `ident.best` was purchased from
 Spaceship the same day for one year through 2027-08-20. Auto-renew and
 private WHOIS are on; the registrar account uses a passkey plus TOTP. No
 real users may be onboarded before the domain decision window ends on
@@ -10,6 +11,24 @@ repeating this runbook. This runbook makes the external setup
 explicit — external review item 4 named the missing production foundation
 as a blocker, and half of that blocker was that no procedure existed to
 follow.
+
+Recorded 2026-08-20:
+
+- Railway project `alert-creativity`, service `@ident/api`, deploys branch
+  `docs/schedule-ident-best`; generated URL
+  `https://identapi-production.up.railway.app` passed `/health`.
+- Neon project `ident` (`spring-fog-70776779`) is Postgres 18 in Frankfurt;
+  the pooled URL is stored only as a masked Railway secret. The free plan's
+  six-hour history is not the independent backup required by section 6.
+- Vercel project `i-dent-web` deploys `apps/web`; production build
+  `5Mk6Cz7yJZNfLaKwBDizgi8F4jj9` completed successfully after setting the
+  build command to build `@ident/shared` before `@ident/web`.
+- Spaceship contains Railway's `api` CNAME and verification TXT plus
+  Vercel's apex A record for `ident.best`. Both custom origins passed external
+  HTTPS checks. Railway injects `PORT=8080`; its custom-domain target must be
+  8080 (the initial 4000 target produced a useful 502 and was corrected).
+- Railway is on a 30-day/$5 trial and displays "Upgrade to keep services
+  online." No payment method or paid plan was authorized.
 
 Written session 22c (2026-08-16), ported from Receiptless's runbook of
 the same name, which has been through a real deployment and a real
@@ -111,9 +130,12 @@ real Google consent. A green run does not imply any of them — the script
 says so in its own output, because "verified" that quietly excludes the
 hard parts is worse than no claim.
 
-**Rehearsed 2026-08-16 against a local API: 7/7 automated checks
-passed.** That proves the script, not a deployment. There is no
-deployment.
+**Rehearsed 2026-08-16 against a local API: 7/7 automated checks passed.**
+That proves the script, not the new deployment. The production run itself is
+now recorded: **2026-08-20 against `https://api.ident.best`, 7/7 automated
+checks passed** (readiness, database, complete/safe configuration, rate
+limiting and DELETE CORS). The four MANUAL rows remain open and are not
+implied by the green result.
 
 ## 6. Backups
 

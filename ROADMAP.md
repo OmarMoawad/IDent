@@ -106,9 +106,14 @@ temporary host domain would make passkeys disposable when the origin changes.
   change inside that window requires deleting test accounts/passkeys,
   updating OAuth/origins/DNS and repeating Session 23; after onboarding,
   a redirect preserves navigation but cannot migrate passkeys.
-- Complete Session 23's Vercel web, Railway API, Neon Postgres and real Google
-  OAuth deployment, then verify rollback, monitoring, backups and restore per
-  `DEPLOYMENT.md`.
+- Session 23 status (2026-08-20): Vercel web, Railway API and Neon Postgres
+  are deployed; `ident.best` and `api.ident.best` now pass external HTTPS
+  checks. The gate remains open for a personally controlled Google OAuth
+  project and consent round trip, monitoring/log evidence, independent
+  backup/restore, and rollback rehearsal. The external verifier passed all
+  7/7 automated checks against `api.ident.best` on 2026-08-20.
+  Railway is on a 30-day/$5 trial, so a paid-plan decision is also required
+  before relying on it beyond the trial. See `DEPLOYMENT.md`.
 
 This gate remains part of Phase 1 completion, not a Phase 2 feature. Phase 2
 may begin only after its evidence is recorded in `IDent_STATE.md`.

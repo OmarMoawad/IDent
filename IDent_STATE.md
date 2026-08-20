@@ -21,7 +21,8 @@ see [OPERATIONS.md](OPERATIONS.md).
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Session 23 — the production-like vertical slice.**
+> **Session 23 is in progress — hosting exists; the production gate is
+> not closed.**
 > `ident.best` was purchased from Spaceship on 2026-08-20 for one year,
 > expiring/renewing on 2027-08-20. The final first-year charge was EGP
 > 85.46. Auto-renew is on (the domain manager displayed EGP 960.63 at
@@ -31,8 +32,42 @@ see [OPERATIONS.md](OPERATIONS.md).
 > production domain, with a final reconsideration window through
 > **2026-09-03**. No real users may be onboarded during that window: a
 > change requires deleting test passkeys and repeating Session 23 against
-> the replacement domain. Create the real Google OAuth client and continue
-> with DEPLOYMENT.md §1.
+> the replacement domain.
+>
+> On 2026-08-20 the API was deployed to Railway from
+> `docs/schedule-ident-best` at commit `e0dda13`, backed by a Neon Postgres
+> 18 project in Frankfurt. Railway ran the migrations as a pre-deploy step;
+> its generated endpoint returned `/health` with `status: ok`, `db: ok`, no
+> missing config and no insecure config. `api.ident.best` has its Railway
+> CNAME and ownership TXT records at Spaceship. The first custom-domain
+> request exposed a port mismatch (Railway injected `PORT=8080` while the
+> custom domain targeted 4000); after correcting the target to 8080,
+> `https://api.ident.best/health` returned the same healthy result.
+>
+> The web app was deployed successfully to Vercel as project `i-dent-web`
+> from `main` commit `319b9dd`, with root `apps/web` and
+> `NEXT_PUBLIC_API_URL=https://api.ident.best`. Vercel needed an explicit
+> monorepo build command so `@ident/shared` builds before `@ident/web`.
+> `ident.best` is connected directly to Production (not redirected to
+> `www`) and its required apex A record is live at Spaceship; an external
+> HTTPS request returned 200 with Vercel's certificate/HSTS response. No test
+> account or passkey has been created.
+>
+> The external verifier then passed all 7/7 automated checks against
+> `https://api.ident.best`: readiness, database connectivity, complete and
+> safe configuration, rate limiting, and DELETE CORS preflight. Its four
+> manual checks remain exactly that: backup/restore, centralized logs,
+> rollback, and real Google consent.
+>
+> Still required before Session 23 can close: a real Google OAuth client and
+> consent round trip; centralized log evidence; an independent backup and
+> restore rehearsal; and a rollback rehearsal. Google Cloud project creation
+> is paused because the signed-in AUC account requires an organization/folder
+> parent even when "No organization" is selected. Do not silently place the
+> production OAuth project under `aucegypt.edu`; use a personally controlled
+> Google account or obtain Omar's explicit ownership decision. Railway is
+> also on a 30-day/$5 trial and warns that an upgrade is required to keep the
+> service online; no payment was authorized or added.
 >
 > **Phase 2 session 1 (the connector abstraction) is done, 2026-08-20 —
 > and it was taken out of order deliberately. Read the next paragraph
@@ -104,8 +139,8 @@ see [OPERATIONS.md](OPERATIONS.md).
 > Objective 0 is done: PRs #1–#5 are on `main`, verified by ancestry
 > rather than GitHub's MERGED label; the `agent/*` worktrees are gone.
 
-Last updated: 2026-08-13 — **Session 20: notification ingestion and inbox
-aggregation.**
+Last updated: 2026-08-20 — **Session 23: production-like deployment in
+progress.**
 
 Scoped precisely, because an earlier draft of this entry overclaimed:
 Phase 1's unified notification *ingestion and aggregation* are
