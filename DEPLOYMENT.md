@@ -1,7 +1,6 @@
 # Deploying IDent
 
-**Status: Session 23 deployment is live on provider and custom hostnames;
-the production gate is not closed.** Vercel (web), Railway
+**Status: Session 23 completed on 2026-08-21.** Vercel (web), Railway
 (API) and Neon (Postgres) were selected on 2026-08-20, and `ident.best` was purchased from
 Spaceship the same day for one year through 2027-08-20. Auto-renew and
 private WHOIS are on; the registrar account uses a passkey plus TOTP. No
@@ -44,6 +43,21 @@ Recorded 2026-08-20:
   and recovered 22 user tables (21 application tables plus Drizzle's migration
   table), all 18 migration records, and the expected zero identities/health
   rows. Google Drive reports the archive as owned by Omar and “Private to you.”
+- The owner test identity `omartest` completed passkey registration/login and
+  a real Google consent round trip. Enabling Gmail API and Google Calendar API
+  in `ident-best-prod` resolved the first callback's expected API-disabled
+  error; the second callback returned `gmail=connected`. The obsolete first
+  client secret was then disabled and permanently deleted, leaving only the
+  verified replacement secret enabled.
+- Railway's centralized log explorer showed structured production request and
+  response records with timestamps, request IDs, methods, routes, status codes
+  and response times. The successful consent exposed OAuth code/state values in
+  the callback URL, so this session also added a tested request-log serializer
+  rule that retains the callback path but redacts its entire query string.
+- Railway rollback restored the previous known-good build and variable
+  snapshot, which became Active after 32 seconds; public `/health` then returned
+  `status: ok` and `db: ok`. The OAuth-enabled deployment was restored forward,
+  became Active after 24 seconds, and passed the same public health check.
 
 Written session 22c (2026-08-16), ported from Receiptless's runbook of
 the same name, which has been through a real deployment and a real
@@ -193,25 +207,30 @@ restore rehearsal at least monthly and after any backup-process change.
 The procedure is **redeploy the last known-good build**, which section 4
 is what makes safe.
 
-It has **not been rehearsed** — Receiptless's rehearsal measured 42
-seconds to recovery, and that number is Receiptless's, not IDent's.
-Rehearsing it here is part of the first real deploy, not something to
-discover during an incident. Write the measured number into this section
-when it happens.
+**Rehearsed 2026-08-21 in Railway production.** Rolling back to the previous
+known-good build restores both its build and its variable snapshot. Railway
+marked that deployment Active after 32 seconds; the operator-observed interval
+through the public `/health` verification was 50 seconds. The endpoint returned
+`status: ok`, `db: ok`, and no missing or insecure configuration. Rolling
+forward to the OAuth-enabled deployment took 24 seconds to Active and passed
+the same public health check. Use **60 seconds** as the measured recovery target
+for this deployment shape, and always restore forward after a rehearsal when
+the older snapshot intentionally lacks newer optional integration variables.
 
 ## 8. What is still missing, honestly
 
-Everything in this list is external review item 4, and none of it can be
-closed by an agent:
+Session 23's production-like gate is closed: hosting, masked provider secrets,
+external health verification, centralized logs, independent backup plus
+restore, rollback plus forward recovery, and real Google consent have all been
+exercised and recorded.
 
-- **No hosting.** Nothing is deployed anywhere.
-- **No secrets management** beyond "environment variables in a host's
-  dashboard" — which is adequate for one person and worth revisiting
-  before it is not.
-- **No monitoring or alerting.** Nothing tells anyone the service is
-  down; the only signal is looking. Receiptless has Sentry and hit the
-  same wall on log drains (a paid tier).
-- **No centralised logs.** Fastify logs to stdout and whatever the host
-  keeps.
-- **No backups**, per section 6.
-- **No rehearsed rollback**, per section 7.
+Remaining operational follow-up is explicit rather than part of that gate:
+
+- Railway is still on a 30-day/$5 trial. Choose and authorize a paid plan before
+  relying on it beyond the trial; this session did not authorize payment.
+- Railway retains/searches stdout logs, but no proactive uptime alert currently
+  pages the owner. Add an external health monitor before onboarding anyone else.
+- Automate the daily independent dump required by the provisional 24-hour RPO.
+- Google OAuth remains External/Testing with one owner test user. Verification
+  and production audience expansion are later launch work, not needed for the
+  private production rehearsal.

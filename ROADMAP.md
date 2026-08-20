@@ -106,20 +106,22 @@ temporary host domain would make passkeys disposable when the origin changes.
   change inside that window requires deleting test accounts/passkeys,
   updating OAuth/origins/DNS and repeating Session 23; after onboarding,
   a redirect preserves navigation but cannot migrate passkeys.
-- Session 23 status (2026-08-20): Vercel web, Railway API and Neon Postgres
+- **Session 23 completed 2026-08-21:** Vercel web, Railway API and Neon Postgres
   are deployed; `ident.best` and `api.ident.best` now pass external HTTPS
   checks. The personally controlled Google OAuth project/client and Railway
   secrets were completed on 2026-08-21. An independent private Google Drive
   backup and isolated Postgres 18 restore rehearsal were also completed on
   2026-08-21, with the checksum and restored object counts recorded in
-  `DEPLOYMENT.md`. The gate remains open for the real consent round trip,
-  monitoring/log evidence, and rollback rehearsal. The external verifier
-  passed all 7/7 automated checks against `api.ident.best` on 2026-08-20.
+  `DEPLOYMENT.md`. The `omartest` owner test identity completed passkey login
+  and real Google consent after Gmail and Calendar APIs were enabled; Railway
+  centralized logs were inspected; and rollback plus forward recovery were
+  rehearsed against production. The external verifier passed all 7/7 automated
+  checks against `api.ident.best` on 2026-08-20.
   Railway is on a 30-day/$5 trial, so a paid-plan decision is also required
   before relying on it beyond the trial. See `DEPLOYMENT.md`.
 
-This gate remains part of Phase 1 completion, not a Phase 2 feature. Phase 2
-may begin only after its evidence is recorded in `IDent_STATE.md`.
+This gate was part of Phase 1 completion, not a Phase 2 feature. Its evidence is
+recorded in `IDent_STATE.md`, so the Phase 2 sequencing gate is now satisfied.
 
 ## Receiptless — Commerce & Receipts (separate repo, early integration target)
 

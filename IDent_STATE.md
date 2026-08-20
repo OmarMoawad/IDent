@@ -21,8 +21,7 @@ see [OPERATIONS.md](OPERATIONS.md).
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Session 23 is in progress — hosting exists; the production gate is
-> not closed.**
+> **Session 23 completed on 2026-08-21 — the production-like gate is closed.**
 > `ident.best` was purchased from Spaceship on 2026-08-20 for one year,
 > expiring/renewing on 2027-08-20. The final first-year charge was EGP
 > 85.46. Auto-renew is on (the domain manager displayed EGP 960.63 at
@@ -67,9 +66,12 @@ see [OPERATIONS.md](OPERATIONS.md).
 > `https://api.ident.best/identity/connections/gmail/callback`. A newly rotated
 > client secret and the client ID/redirect URI are stored only as masked
 > Railway variables. The replacement deployment became Online and `/health`
-> remained fully healthy. The older secret remains enabled until a real
-> consent round trip proves the new one, after which it should be disabled and
-> deleted.
+> remained fully healthy. The owner test identity `omartest` then completed a
+> real passkey login and Google consent round trip. The first callback exposed
+> that Gmail API and Calendar API had not been enabled; both were enabled in
+> `ident-best-prod`, and the retry returned `gmail=connected`. The older client
+> secret was then disabled and permanently deleted, leaving only the verified
+> replacement enabled.
 >
 > The independent-backup gate was completed on 2026-08-21. A 48,607-byte
 > custom-format Neon dump was validated, uploaded to a private folder in
@@ -82,10 +84,16 @@ see [OPERATIONS.md](OPERATIONS.md).
 > provisional targets are RPO 24 hours and RTO 30 minutes; daily automation
 > remains follow-up operational work.
 >
-> Still required before Session 23 can close: the real Google consent round
-> trip; centralized log evidence; and a rollback rehearsal. Railway is
-> also on a 30-day/$5 trial and warns that an upgrade is required to keep the
-> service online; no payment was authorized or added.
+> Railway's centralized log explorer was verified with structured request IDs,
+> methods, routes, statuses and timings. The consent rehearsal revealed that
+> OAuth callback codes/state were present in logged query strings; a regression
+> test now proves the request serializer replaces that query with `[redacted]`.
+> Railway rollback restored the previous known-good deployment in 32 seconds
+> (50 seconds through operator-observed public health verification), and forward
+> recovery restored the OAuth-enabled deployment in 24 seconds; `/health` was
+> fully healthy after both. Railway remains on a 30-day/$5 trial and no payment
+> was authorized. Daily backup automation and proactive uptime alerting remain
+> operational follow-up, but they do not reopen the completed rehearsal gate.
 >
 > **Phase 2 session 1 (the connector abstraction) is done, 2026-08-20 —
 > and it was taken out of order deliberately. Read the next paragraph
@@ -157,8 +165,8 @@ see [OPERATIONS.md](OPERATIONS.md).
 > Objective 0 is done: PRs #1–#5 are on `main`, verified by ancestry
 > rather than GitHub's MERGED label; the `agent/*` worktrees are gone.
 
-Last updated: 2026-08-21 — **Session 23: production-like deployment in
-progress.**
+Last updated: 2026-08-21 — **Session 23: production-like deployment
+completed.**
 
 Scoped precisely, because an earlier draft of this entry overclaimed:
 Phase 1's unified notification *ingestion and aggregation* are

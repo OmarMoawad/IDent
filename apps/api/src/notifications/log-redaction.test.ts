@@ -40,3 +40,23 @@ describe("ingest token is never written to the request log", () => {
     expect(captured.lines.join("\n")).toContain("/health");
   });
 });
+
+describe("OAuth credentials are never written to the request log", () => {
+  it("redacts the callback query string while retaining the route", async () => {
+    const captured = captureLogs();
+    const app = buildApp({ loggerStream: captured.stream });
+    const code = `code-${randomUUID()}`;
+    const state = `state-${randomUUID()}`;
+
+    await app.inject({
+      method: "GET",
+      url: `/identity/connections/gmail/callback?code=${code}&state=${state}`,
+    });
+    await app.close();
+
+    const output = captured.lines.join("\n");
+    expect(output).toContain("/identity/connections/gmail/callback?[redacted]");
+    expect(output).not.toContain(code);
+    expect(output).not.toContain(state);
+  });
+});

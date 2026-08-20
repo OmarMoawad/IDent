@@ -38,12 +38,18 @@ export function buildApp(
          * for every log line of that request, not just the access log.
          *
          * The header form carries no credential in the URL and is the
-         * preferred path; this covers the compatibility fallback.
+         * preferred path; this covers the compatibility fallback. Google
+         * returns its one-time authorization code and state in the Gmail
+         * callback query string, so that route retains its useful path in
+         * logs while dropping the entire query before it reaches Railway.
          */
         req(request: FastifyRequest) {
+          const url = request.url
+            .replace(/^(\/notifications\/ingest)\/[^/?#]+/, "$1/[redacted]")
+            .replace(/^(\/identity\/connections\/gmail\/callback)\?.*$/, "$1?[redacted]");
           return {
             method: request.method,
-            url: request.url.replace(/^(\/notifications\/ingest)\/[^/?#]+/, "$1/[redacted]"),
+            url,
             host: request.headers.host,
             remoteAddress: request.ip,
           };
