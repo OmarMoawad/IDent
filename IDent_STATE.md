@@ -5,8 +5,28 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
-> **Next action: Session 23 — the production-like vertical slice. Every
-> part of it that an agent can do is done; what remains needs Omar.**
+> **Next action: Session 23 — the production-like vertical slice. It is
+> still the next session, it still needs Omar, and nothing below changes
+> that.** Choose a host, register a domain, create a real Google OAuth
+> client. DEPLOYMENT.md §1 is the decision table.
+>
+> **Phase 2 session 1 (the connector abstraction) is done, 2026-08-20 —
+> and it was taken out of order deliberately. Read the next paragraph
+> before treating Phase 2 as started.** The gate written into this file
+> says Phase 2's sessions do not begin until sessions 22 *and* 23 are
+> done, and 23 cannot begin without Omar. The reason for the gate,
+> stated where it was written, is to **pause new surface area** until one
+> production-like slice is exercised. This session adds none: no new
+> route, no new table, no new user-facing behaviour, no new provider —
+> it is an internal refactor whose success criterion was that the
+> existing Gmail suite pass **unedited**, which it does. It was chosen
+> because it was the only fully-unblocked engineering work left in the
+> repo and because it makes the sessions that *are* gated cheaper rather
+> than larger. That reasoning is offered, not assumed: if Omar would
+> rather the gate be read literally, this session should be treated as
+> preparation sitting on `main`, not as Phase 2 having begun. See
+> "Session outcome — Phase 2 session 1" below.
+>
 > Sessions 22b and 22c are **done, 2026-08-16**. 22b closed the three
 > gating items (CORS, rate limiting, encryption-key enforcement). 22c
 > closed everything else in the review that does not require an account
@@ -1871,6 +1891,97 @@ The others are feature work with narrower blast radius.
 - [x] `docs/progress.svg` regenerated from `main` — already current at
       18%, no diff
 
+## Session outcome — Phase 2 session 1 (connector abstraction), 2026-08-20
+
+**Taken out of order. The gate above says Phase 2 waits for session 23,
+which needs Omar.** The justification is in the header block and is not
+repeated here; what matters for anyone resuming is that this session adds
+no surface area — no route, no table, no provider, no user-facing change
+— and that it can be read as preparation rather than as Phase 2 having
+started, if that is the call.
+
+**The problem, restated from what was actually in the code.**
+`connected_sources.provider` has always been a plain `string` column, and
+`store.ts` has always been provider-neutral. So the *table* was generic
+while the only code path able to write to it was not: "which provider"
+existed nowhere as a value — only as the literal `"gmail"` in
+`gmail-service.ts` and Google's endpoints hardcoded in
+`google-oauth-client.ts`. Adding Slack and Notion on top of that meant
+writing the state/PKCE/token-refresh dance three times and fixing every
+future bug in it three times.
+
+**What exists now**
+
+- `connector-types.ts` — the provider-agnostic contract, importing
+  nothing. `ExchangedTokens` and `RefreshedTokens` moved here unchanged;
+  neither was ever Google-specific, they were just written in Google's
+  file first. Re-exported from their old home so no existing import
+  broke.
+- `ConnectedAccount` — an account **id** and a display **label**, kept
+  apart. This is the one place the Gmail shape actively misled: for Gmail
+  they are the same string, for Slack the id is a workspace user id and
+  for Notion a bot id, and neither is an address. `connected_sources` has
+  had two columns for this all along.
+- `connector-registry.ts` — connectors as data. Duplicate ids throw at
+  startup rather than silently shadowing one another and routing real
+  users' tokens through the wrong client.
+- `connection-service.ts` — the lifecycle, once: state minting, PKCE,
+  code exchange, encryption, near-expiry refresh, revoke-then-clear.
+- `gmail-service.ts` — four one-line delegations and one error mapping.
+
+**Two things that are behaviour, not tidying**
+
+1. **The connector for a refresh or a disconnect is resolved from the
+   stored row's own `provider` column**, not from an argument. Which
+   provider a source belongs to is a fact about the row; a call site
+   should not be able to get it wrong.
+2. **A state challenge is checked against the connector completing it**,
+   so a state minted for one provider cannot be redeemed at another's
+   callback.
+
+**A fact that was true and written down nowhere.** `GOOGLE_OAUTH_SCOPES`
+has requested `calendar.readonly` in the same consent as
+`gmail.readonly` since session 15 — the Gmail connection has always
+carried calendar access. The registry entry now declares
+`feeds: ["mail", "calendar"]`, and a test asserts it, so the next person
+reading "Gmail connector" is not surprised by what the consent screen
+asks for.
+
+**Evidence, not assertion**
+
+- **`gmail-service.test.ts`, `gmail-sync-service.test.ts` and
+  `google-oauth-client.test.ts` pass unedited.** That was the success
+  criterion this file set for the session before it started, and
+  `git status` on the branch shows no test file modified.
+- **`connection-service.test.ts` is the other half of the evidence**, and
+  it is the half that matters. The Gmail suite passing proves the
+  refactor broke nothing; it would pass just as well if every Google
+  assumption were still buried in the shared code. So the new suite runs
+  the full connect / refresh / reconnect / disconnect lifecycle through a
+  connector whose account id is an opaque workspace id, whose label is
+  not an address, and whose endpoints are invented.
+- `FakeGoogleOAuthClient` gained `getAccount` **alongside**
+  `getAccountEmail`, not instead of it, so tests that program
+  `nextAccountEmail` keep working. Renaming what the double exposes would
+  have broken the "unedited suite" promise on a technicality.
+- `npm run typecheck` clean. `npm test` green: **310 passed, 3 skipped
+  across 30 API files, plus 35 web tests across 4 files**, against local
+  Postgres on 5432.
+
+**What this does not do, stated so the next session does not assume it**
+
+1. **No provider has been added.** Sessions 2 (Slack) and 3 (Notion)
+   still need Omar to create the apps and hand over client credentials.
+   This session makes those sessions smaller; it does not unblock them.
+2. **No new routes.** The connection endpoints are still
+   `/identity/connections/gmail/...`. A generic
+   `/identity/connections/:provider/...` shape is the obvious follow-up
+   and was deliberately not taken, because it *would* be new surface
+   area and the gate above is about exactly that.
+3. **Still no real OAuth against a real Google client.** Every external
+   dependency in this repo is still exercised against a fake, which is
+   the same thing session 22 said and session 23 exists to fix.
+
 ## Sessions 22–24 — foundation before features (after Objective 0)
 
 Inserted ahead of the Phase 2 cadence below on CTO review, 2026-08-13. The
@@ -2294,9 +2405,10 @@ where a delay doesn't block the phase from being usable.
 Ordered so the first session is fully unblocked and each later one has a
 reason to come after the one before it.
 
-1. **Connector abstraction — do this first, before any new provider.**
-   The OAuth lifecycle is currently Gmail-shaped: `gmail-service.ts`
-   owns connect/refresh/disconnect, and `google-oauth-client.ts` hardcodes
+1. ~~**Connector abstraction — do this first, before any new provider.**~~
+   **Done 2026-08-20 — see "Session outcome — Phase 2 session 1" below.**
+   The OAuth lifecycle was Gmail-shaped: `gmail-service.ts`
+   owned connect/refresh/disconnect, and `google-oauth-client.ts` hardcoded
    Google's endpoints and scopes. `connected_sources` is already generic,
    so the table is fine — the *flow* is not. Adding Slack and Notion
    before extracting a provider registry means writing the state/PKCE/

@@ -91,6 +91,19 @@ platforms). Adapters normalize external data into IDent's internal schema and
 are the only components allowed to hold third-party API credentials —
 scoped per user, never shared across users.
 
+**As built (Phase 2 session 1, 2026-08-20):** an adapter's OAuth half is a
+`Connector` in `apps/api/src/comms/connector-registry.ts` — an id, a
+display name, the feeds it contributes, and a client implementing
+`OAuthConnectorClient` (`connector-types.ts`). The authorization-code
+lifecycle itself — state, PKCE, code exchange, token encryption,
+near-expiry refresh, revoke-then-clear — lives once in
+`connection-service.ts` and is provider-agnostic; the connector supplies
+only what is genuinely the provider's own (its endpoints, its scopes, how
+it names an account). Adding a provider is a client plus a registry entry,
+not another copy of the lifecycle. Gmail is the only entry so far, and
+declares both `mail` and `calendar` because its consent has always
+requested both scopes.
+
 ### Vault subsystem
 
 Backs the highest-trust modules: Documents & Credentials, Educational

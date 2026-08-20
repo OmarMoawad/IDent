@@ -16,7 +16,7 @@ import { dirname, resolve } from "node:path";
 const PHASES = [
   { name: "Identity Core & Platform Foundation", status: "done" },
   { name: "Communications Hub", status: "done" },
-  { name: "Productivity & Real-Time Comms", status: "current", sessionsDone: 3, sessionsTotal: 12 },
+  { name: "Productivity & Real-Time Comms", status: "current", sessionsDone: 4, sessionsTotal: 12 },
   { name: "Documents, Credentials & Ed. Profile", status: "pending" },
   { name: "Health Profile", status: "pending" },
   { name: "Finance", status: "pending" },

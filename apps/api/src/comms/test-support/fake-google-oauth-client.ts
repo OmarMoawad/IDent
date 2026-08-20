@@ -1,3 +1,4 @@
+import type { ConnectedAccount } from "../connector-types.js";
 import type { ExchangedTokens, GoogleOAuthClient, RefreshedTokens } from "../google-oauth-client.js";
 
 /**
@@ -67,5 +68,18 @@ export class FakeGoogleOAuthClient implements GoogleOAuthClient {
     this.getAccountEmailCalls.push(accessToken);
     if (this.nextAccountEmail instanceof Error) throw this.nextAccountEmail;
     return this.nextAccountEmail;
+  }
+
+  /**
+   * Phase 2 session 1: the generic form the connection service calls.
+   * Added alongside `getAccountEmail` rather than replacing it, so every
+   * existing test that programs `nextAccountEmail` keeps working — the
+   * refactor was required to leave the Gmail suite untouched, and quietly
+   * renaming what its double exposes would have broken that promise on a
+   * technicality.
+   */
+  async getAccount(accessToken: string): Promise<ConnectedAccount> {
+    const emailAddress = await this.getAccountEmail(accessToken);
+    return { id: emailAddress, email: emailAddress };
   }
 }
