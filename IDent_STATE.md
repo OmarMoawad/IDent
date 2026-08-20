@@ -71,9 +71,19 @@ see [OPERATIONS.md](OPERATIONS.md).
 > consent round trip proves the new one, after which it should be disabled and
 > deleted.
 >
+> The independent-backup gate was completed on 2026-08-21. A 48,607-byte
+> custom-format Neon dump was validated, uploaded to a private folder in
+> Omar's personal Google Drive, and restored into an isolated Postgres 18
+> container. The rehearsal recovered 22 user tables (21 application tables
+> plus Drizzle migrations), all 18 migration records, and the expected zero
+> identities and health rows; the database restore itself took 0.14s. SHA-256
+> is `684b3207ae4157da9a926c2a032e0925f30b7806ceaa3c8e44b20a4065443df8`.
+> Drive reports the archive as owned by Omar and “Private to you.” The
+> provisional targets are RPO 24 hours and RTO 30 minutes; daily automation
+> remains follow-up operational work.
+>
 > Still required before Session 23 can close: the real Google consent round
-> trip; centralized log evidence; an independent backup and restore rehearsal;
-> and a rollback rehearsal. Railway is
+> trip; centralized log evidence; and a rollback rehearsal. Railway is
 > also on a 30-day/$5 trial and warns that an upgrade is required to keep the
 > service online; no payment was authorized or added.
 >
@@ -147,7 +157,7 @@ see [OPERATIONS.md](OPERATIONS.md).
 > Objective 0 is done: PRs #1–#5 are on `main`, verified by ancestry
 > rather than GitHub's MERGED label; the `agent/*` worktrees are gone.
 
-Last updated: 2026-08-20 — **Session 23: production-like deployment in
+Last updated: 2026-08-21 — **Session 23: production-like deployment in
 progress.**
 
 Scoped precisely, because an earlier draft of this entry overclaimed:

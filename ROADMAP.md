@@ -109,10 +109,12 @@ temporary host domain would make passkeys disposable when the origin changes.
 - Session 23 status (2026-08-20): Vercel web, Railway API and Neon Postgres
   are deployed; `ident.best` and `api.ident.best` now pass external HTTPS
   checks. The personally controlled Google OAuth project/client and Railway
-  secrets were completed on 2026-08-21. The gate remains open for the real
-  consent round trip, monitoring/log evidence, independent
-  backup/restore, and rollback rehearsal. The external verifier passed all
-  7/7 automated checks against `api.ident.best` on 2026-08-20.
+  secrets were completed on 2026-08-21. An independent private Google Drive
+  backup and isolated Postgres 18 restore rehearsal were also completed on
+  2026-08-21, with the checksum and restored object counts recorded in
+  `DEPLOYMENT.md`. The gate remains open for the real consent round trip,
+  monitoring/log evidence, and rollback rehearsal. The external verifier
+  passed all 7/7 automated checks against `api.ident.best` on 2026-08-20.
   Railway is on a 30-day/$5 trial, so a paid-plan decision is also required
   before relying on it beyond the trial. See `DEPLOYMENT.md`.
 

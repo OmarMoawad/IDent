@@ -36,6 +36,14 @@ Recorded 2026-08-20:
   post-change deployment returned a healthy readiness response. Keep the old
   secret enabled only until the first real consent round trip succeeds, then
   disable and delete it in Google Cloud.
+- An independent custom-format Postgres dump was uploaded to a private folder
+  in Omar's personal Google Drive on 2026-08-21. The archive is 48,607 bytes
+  with SHA-256
+  `684b3207ae4157da9a926c2a032e0925f30b7806ceaa3c8e44b20a4065443df8`.
+  A fresh restore into an isolated Postgres 18 container succeeded in 0.14s
+  and recovered 22 user tables (21 application tables plus Drizzle's migration
+  table), all 18 migration records, and the expected zero identities/health
+  rows. Google Drive reports the archive as owned by Omar and “Private to you.”
 
 Written session 22c (2026-08-16), ported from Receiptless's runbook of
 the same name, which has been through a real deployment and a real
@@ -141,18 +149,31 @@ hard parts is worse than no claim.
 That proves the script, not the new deployment. The production run itself is
 now recorded: **2026-08-20 against `https://api.ident.best`, 7/7 automated
 checks passed** (readiness, database, complete/safe configuration, rate
-limiting and DELETE CORS). The four MANUAL rows remain open and are not
-implied by the green result.
+limiting and DELETE CORS). Backup/restore was then completed manually on
+2026-08-21 as recorded below. Logs, rollback and real Google consent remain
+open and are not implied by the green result.
 
 ## 6. Backups
 
-Same shape as Receiptless, which has scripts for this and has rehearsed a
-restore. IDent has neither yet, and the reason is not laziness: without a
-hosting decision there is no database to back up and no machine to run
-the job on.
+The first independent backup and restore rehearsal completed on 2026-08-21.
+`pg_dump` produced a custom-format, no-owner/no-privileges archive from Neon;
+the archive was validated with `pg_restore --list`, uploaded outside Neon to a
+private personal Google Drive folder, and restored into an isolated local
+Postgres 18 container. The restored database contained 22 user tables, 18/18
+migration records, and the expected zero production identities. Restore time
+for the database operation was 0.14s; allow a provisional **RTO of 30 minutes**
+for archive retrieval, operator setup and verification. Until an automated
+schedule exists, the provisional **RPO is 24 hours** and requires a daily dump.
 
-When there is one, the requirements are already known and are not
-negotiable:
+Archive evidence:
+
+- File: `ident-production-2026-08-21.dump`
+- Size: 48,607 bytes (Drive displays 47 KB)
+- SHA-256: `684b3207ae4157da9a926c2a032e0925f30b7806ceaa3c8e44b20a4065443df8`
+- Independent storage: private folder in Omar's personal Google Drive,
+  reported by Drive as “Private to you”
+
+The ongoing requirements remain:
 
 - An **independent** dump, somewhere that is not the database provider —
   provider-side point-in-time recovery does not survive the account, a
@@ -162,9 +183,10 @@ negotiable:
 - **RPO and RTO written down as numbers**, not implied by "we have
   backups".
 
-Copy `scripts/backup-database.mjs` and `scripts/verify-backup-restore.mjs`
-from Receiptless when the time comes; they are provider-agnostic
-`pg_dump`/`pg_restore` wrappers.
+Next, copy `scripts/backup-database.mjs` and
+`scripts/verify-backup-restore.mjs` from Receiptless and automate the daily
+dump. They are provider-agnostic `pg_dump`/`pg_restore` wrappers. Repeat a
+restore rehearsal at least monthly and after any backup-process change.
 
 ## 7. Rollback
 
