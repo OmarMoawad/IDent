@@ -1,12 +1,12 @@
 # Deploying IDent
 
 **Status: nothing is deployed.** Vercel (web), Railway (API) and Neon
-(Postgres) were selected on 2026-08-20, with `ident.best` selected as the
-production domain. It was available at Spaceship for EGP 75.30 in year one
-and EGP 950.50/year on renewal, but is not reserved and must be re-checked
-at checkout. No real users may be onboarded before the domain decision
-window ends on 2026-09-03; changing it before then means deleting test
-passkeys and repeating this runbook. This runbook makes the external setup
+(Postgres) were selected on 2026-08-20, and `ident.best` was purchased from
+Spaceship the same day for one year through 2027-08-20. Auto-renew and
+private WHOIS are on; the registrar account uses a passkey plus TOTP. No
+real users may be onboarded before the domain decision window ends on
+2026-09-03; changing it before then means deleting test passkeys and
+repeating this runbook. This runbook makes the external setup
 explicit — external review item 4 named the missing production foundation
 as a blocker, and half of that blocker was that no procedure existed to
 follow.

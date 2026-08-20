@@ -94,12 +94,11 @@ as a production-like vertical slice. The permanent WebAuthn relying-party
 domain is a hard prerequisite: a registrar cart is not a reservation, and a
 temporary host domain would make passkeys disposable when the origin changes.
 
-- Re-check and purchase `ident.best` before Session 23. At the 2026-08-20
-  check, Spaceship showed EGP 75.30 for year one and EGP 950.50/year on
-  renewal, with no premium/aftermarket label; confirm availability,
-  premium status and both prices again before payment.
-- Enable WHOIS privacy, auto-renew, registrar lock and registrar-account 2FA;
-  keep recovery on an external address rather than an `@ident.best` inbox.
+- ~~Purchase `ident.best` before Session 23.~~ **Done 2026-08-20:** one
+  year through 2027-08-20, EGP 85.46 charged; auto-renew and private WHOIS
+  are on, no add-on trial was purchased, and the registrar account uses a
+  passkey plus TOTP. Keep recovery on an external address rather than an
+  `@ident.best` inbox.
 - Use `ident.best` for the web app and WebAuthn RP ID, and
   `api.ident.best` for the API. Do not register test passkeys against a
   temporary Vercel or Railway hostname.
