@@ -17,6 +17,58 @@ import { registerRateLimiting } from "./rate-limit/plugin.js";
 import { readinessFrom } from "./readiness.js";
 
 /**
+ * Query parameters that are safe to keep, and worth keeping. `error` and
+ * `error_description` are the provider's own diagnosis of a failed
+ * consent — `access_denied` when someone declines, or the message naming
+ * an API that has not been enabled, which is precisely what made the
+ * first production callback failure readable. Dropping the whole query
+ * string would have thrown that away along with the credential.
+ *
+ * They are provider-authored text rather than our own, so they are
+ * echoed into logs and nowhere else.
+ */
+const LOGGABLE_CALLBACK_PARAMS = ["error", "error_description"] as const;
+
+/**
+ * Matches any connector's callback, not just Gmail's. The connector
+ * abstraction exists so that there will be more than one provider, and a
+ * pattern anchored to the literal `gmail` path would log the next
+ * provider's authorization code in the clear on the day it was added —
+ * silently, and in exactly the place this redaction was written to
+ * protect. `[^/?#]+` is the provider segment.
+ */
+const OAUTH_CALLBACK_URL = /^(\/identity\/connections\/[^/?#]+\/callback)\?(.*)$/;
+
+function redactCallbackQuery(url: string): string {
+  const match = OAUTH_CALLBACK_URL.exec(url);
+  if (!match) return url;
+
+  const [, path, query] = match;
+  const parsed = new URLSearchParams(query);
+  const kept = new URLSearchParams();
+  for (const name of LOGGABLE_CALLBACK_PARAMS) {
+    const value = parsed.get(name);
+    if (value !== null) kept.set(name, value);
+  }
+
+  const preserved = kept.toString();
+  return `${path}?${preserved ? `${preserved}&` : ""}[redacted]`;
+}
+
+/**
+ * Every URL redaction this service performs, in one function, because
+ * `req.url` is not the only place a URL reaches the log. Fastify's
+ * default not-found handler builds its message from the raw URL and logs
+ * it — so a callback that arrives at a path no route serves (a redirect
+ * URI typed wrong in a provider console, a connector renamed, or someone
+ * probing) wrote a live authorization code into the log through a door
+ * the serializer does not cover. Anything that logs a URL calls this.
+ */
+export function redactSensitiveUrl(url: string): string {
+  return redactCallbackQuery(url.replace(/^(\/notifications\/ingest)\/[^/?#]+/, "$1/[redacted]"));
+}
+
+/**
  * `loggerStream` exists so a test can assert on what actually reaches the
  * log output — see notifications/log-redaction.test.ts. Production passes
  * nothing and gets Fastify's default destination.
@@ -38,15 +90,15 @@ export function buildApp(
          * for every log line of that request, not just the access log.
          *
          * The header form carries no credential in the URL and is the
-         * preferred path; this covers the compatibility fallback. Google
-         * returns its one-time authorization code and state in the Gmail
-         * callback query string, so that route retains its useful path in
-         * logs while dropping the entire query before it reaches Railway.
+         * preferred path; this covers the compatibility fallback.
+         *
+         * An OAuth provider returns its one-time authorization code and
+         * the state value in the callback query string, so those routes
+         * keep their useful path in logs and lose the query — see
+         * `redactCallbackQuery` for what survives and why.
          */
         req(request: FastifyRequest) {
-          const url = request.url
-            .replace(/^(\/notifications\/ingest)\/[^/?#]+/, "$1/[redacted]")
-            .replace(/^(\/identity\/connections\/gmail\/callback)\?.*$/, "$1?[redacted]");
+          const url = redactSensitiveUrl(request.url);
           return {
             method: request.method,
             url,
@@ -111,6 +163,25 @@ export function buildApp(
   registerAssistantRoutes(app);
   registerImportanceRoutes(app);
   registerNotificationRoutes(app);
+
+  /**
+   * Replaces Fastify's default, which logs and returns
+   * `Route GET:<raw url> not found`. That raw URL is the leak: it is
+   * built before any route matched, so it carries whatever query the
+   * caller sent — including an OAuth authorization code that arrived at
+   * the wrong path. Same redaction as the serializer, in both the log
+   * line and the body, since the body is what a provider's browser
+   * redirect would render on screen.
+   */
+  app.setNotFoundHandler((request, reply) => {
+    const url = redactSensitiveUrl(request.url);
+    request.log.info(`Route ${request.method}:${url} not found`);
+    return reply.code(404).send({
+      message: `Route ${request.method}:${url} not found`,
+      error: "Not Found",
+      statusCode: 404,
+    });
+  });
 
   return app;
 }
