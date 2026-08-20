@@ -5,37 +5,37 @@ import {
   GOOGLE_OAUTH_CLIENT_SECRET,
   GOOGLE_OAUTH_REDIRECT_URI,
 } from "./comms-config.js";
+import type {
+  ConnectedAccount,
+  ExchangedTokens,
+  OAuthConnectorClient,
+  RefreshedTokens,
+} from "./connector-types.js";
 
-export type ExchangedTokens = {
-  accessToken: string;
-  // Google only returns a refresh token on first consent (or a re-consent
-  // forced via prompt=consent) — null here would mean "no refresh token
-  // issued," which getAuthorizationUrl's prompt=consent is specifically
-  // there to avoid on a first-time connection.
-  refreshToken: string | null;
-  expiresAt: Date;
-  scope: string;
-};
-
-export type RefreshedTokens = {
-  accessToken: string;
-  expiresAt: Date;
-  // Google occasionally rotates the refresh token on refresh too — null
-  // means "unchanged, the caller should keep using the existing one."
-  refreshToken: string | null;
-};
+/**
+ * Phase 2 session 1: `ExchangedTokens` and `RefreshedTokens` moved to
+ * connector-types.ts, because nothing in either of them was ever
+ * Google-specific — they described the OAuth authorization-code grant and
+ * happened to be written in Google's file first. Re-exported here so the
+ * existing imports across this module keep working; new code should take
+ * them from connector-types.js.
+ */
+export type { ExchangedTokens, RefreshedTokens } from "./connector-types.js";
 
 /**
  * The seam gmail-service.ts calls through instead of talking to Google
  * directly — lets comms/test-support/fake-google-oauth-client.ts stand in
  * during tests (same role identity/test-support/software-authenticator.ts
  * plays for WebAuthn: real business logic, no real third party involved).
+ *
+ * Session 1 of Phase 2 narrows this to "Google's implementation of
+ * `OAuthConnectorClient`, plus the one Google-shaped extra it also
+ * offers". `getAccountEmail` stays because Google's profile endpoint
+ * genuinely returns an address and this client's own test exercises it
+ * directly; the generic connection service does not know it exists and
+ * calls `getAccount` instead.
  */
-export interface GoogleOAuthClient {
-  getAuthorizationUrl(state: string, codeChallenge: string): string;
-  exchangeCodeForTokens(code: string, codeVerifier: string): Promise<ExchangedTokens>;
-  refreshAccessToken(refreshToken: string): Promise<RefreshedTokens>;
-  revokeToken(token: string): Promise<void>;
+export interface GoogleOAuthClient extends OAuthConnectorClient {
   /**
    * The provider's stable identifier for the account that was just
    * connected — for Gmail, the mailbox's own email address (session
@@ -159,6 +159,17 @@ export class RealGoogleOAuthClient implements GoogleOAuthClient {
       throw new GoogleOAuthError("Could not fetch the connected Gmail account's profile.");
     }
     return body.emailAddress;
+  }
+
+  /**
+   * The generic form the connection service uses. For Gmail the mailbox
+   * address is both the stable id and the human-readable label, so both
+   * fields carry it — a coincidence of this provider, not a rule, which is
+   * exactly why `ConnectedAccount` keeps them apart.
+   */
+  async getAccount(accessToken: string): Promise<ConnectedAccount> {
+    const emailAddress = await this.getAccountEmail(accessToken);
+    return { id: emailAddress, email: emailAddress };
   }
 }
 
