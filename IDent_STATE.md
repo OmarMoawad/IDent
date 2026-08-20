@@ -21,6 +21,33 @@ see [OPERATIONS.md](OPERATIONS.md).
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
+> **Next action: Session 23a — two gates, before Session 24 and before any
+> Phase 2 session.** Both need Omar, neither is feature work, and both came
+> out of reviewing Session 23 after it closed rather than out of the session
+> itself. See ROADMAP.md "Session 23a" for the full statement.
+>
+> 1. **Repoint Railway from `docs/schedule-ident-best` to `main`.**
+>    Production's API builds from a feature branch, so merging that branch's
+>    PR and deleting it removes the ref Railway builds from — and it would
+>    show up as production going stale, not as anything red in GitHub. The
+>    same split means the web app and the API are built from different code
+>    right now: Vercel deploys `main`, Railway deploys the branch. Order:
+>    merge PR #13 → repoint to `main` → confirm `/health` and
+>    `scripts/verify-deployment.mjs` pass against a `main` build → then
+>    delete the branch. Any other order either rolls production backwards or
+>    leaves it with nothing to build.
+>
+> 2. **Reconcile the backup's zero identity count.** The restore rehearsal
+>    recovered zero identities from a database `omartest` had registered
+>    against in the same session. Compare `SELECT count(*) FROM identities;`
+>    on production against the same count in a fresh restore of a new dump.
+>    Until they agree and are non-zero, the backup gate is **not** closed:
+>    what was proven is that the schema and migration history round-trip,
+>    not that data does.
+>
+> Everything else — daily dump automation, external uptime alerting, the
+> Railway paid-plan decision, and Session 24 — waits behind these two.
+>
 > **Session 23 review, 2026-08-21 — three corrections before the PR.**
 > Reviewing the closed session against the repo rather than against its own
 > notes turned up one live risk, one leak the fix had missed, and one
@@ -200,8 +227,9 @@ see [OPERATIONS.md](OPERATIONS.md).
 > Objective 0 is done: PRs #1–#5 are on `main`, verified by ancestry
 > rather than GitHub's MERGED label; the `agent/*` worktrees are gone.
 
-Last updated: 2026-08-21 — **Session 23: production-like deployment
-completed.**
+Last updated: 2026-08-21 — **Session 23 completed and reviewed; Session 23a
+(Railway repoint + backup reconciliation) is the next action, and both need
+Omar.**
 
 Scoped precisely, because an earlier draft of this entry overclaimed:
 Phase 1's unified notification *ingestion and aggregation* are
