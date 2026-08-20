@@ -5,6 +5,22 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
+> **This repository is public as of 2026-08-20, and that does not
+> overturn the review's verdict below.** The review said keep IDent
+> *local/private* — meaning do not **run** it where the public can reach
+> it, with no hosting, monitoring or backups in place. That is still
+> true and still gates session 23. Publishing the **source** is a
+> different axis: the code was made public so GitHub Actions minutes
+> stop being metered (private repos on the Free plan get 2000/month, and
+> they ran out on 2026-08-20, blocking CI on both repos). Before
+> flipping it, the full history of both repos was scanned — no `.env`
+> was ever committed, and there are no tokens, API keys or remote
+> database credentials anywhere in it. The committed
+> `DEV_ONLY_KEY_BASE64` in `comms-config.ts` is deliberate and safe to
+> publish: `resolveTokenEncryptionKey` fails closed in any deployed
+> environment and rejects that key even when set on purpose, which is
+> exactly what review item 3 asked for.
+>
 > **Next action: Session 23 — the production-like vertical slice. It is
 > still the next session, it still needs Omar, and nothing below changes
 > that.** Choose a host, register a domain, create a real Google OAuth
