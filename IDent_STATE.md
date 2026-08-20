@@ -21,10 +21,19 @@ see [OPERATIONS.md](OPERATIONS.md).
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Session 23 — the production-like vertical slice. It is
-> still the next session, it still needs Omar, and nothing below changes
-> that.** Choose a host, register a domain, create a real Google OAuth
-> client. DEPLOYMENT.md §1 is the decision table.
+> **Next action: acquire the permanent production domain, then Session 23
+> — the production-like vertical slice.** `ident.best` was available at
+> Spaceship on 2026-08-20 for EGP 75.30 in year one and EGP 950.50 per
+> year on renewal, with no premium/aftermarket label. A cart does not
+> reserve a domain, so availability and both prices must be checked again
+> at purchase. Re-check and purchase it before Session 23, enable
+> WHOIS privacy, auto-renew, registrar lock and account 2FA, then record
+> the registration and expiry dates here. `ident.best` is the selected
+> production domain, with a final reconsideration window through
+> **2026-09-03**. No real users may be onboarded during that window: a
+> change requires deleting test passkeys and repeating Session 23 against
+> the replacement domain. After ownership is confirmed, create the real
+> Google OAuth client and continue with DEPLOYMENT.md §1.
 >
 > **Phase 2 session 1 (the connector abstraction) is done, 2026-08-20 —
 > and it was taken out of order deliberately. Read the next paragraph

@@ -87,6 +87,33 @@ replace" model before adding anything sensitive.
 **Exit criteria:** daily-driver usable as a notification/inbox aggregator,
 with a working, honestly-described private-assistant upsell.
 
+### Production exit gate — permanent domain and Session 23
+
+Before Phase 2 adds new user-facing surface area, Phase 1 must be exercised
+as a production-like vertical slice. The permanent WebAuthn relying-party
+domain is a hard prerequisite: a registrar cart is not a reservation, and a
+temporary host domain would make passkeys disposable when the origin changes.
+
+- Re-check and purchase `ident.best` before Session 23. At the 2026-08-20
+  check, Spaceship showed EGP 75.30 for year one and EGP 950.50/year on
+  renewal, with no premium/aftermarket label; confirm availability,
+  premium status and both prices again before payment.
+- Enable WHOIS privacy, auto-renew, registrar lock and registrar-account 2FA;
+  keep recovery on an external address rather than an `@ident.best` inbox.
+- Use `ident.best` for the web app and WebAuthn RP ID, and
+  `api.ident.best` for the API. Do not register test passkeys against a
+  temporary Vercel or Railway hostname.
+- Keep a no-real-users decision window through **2026-09-03**. A domain
+  change inside that window requires deleting test accounts/passkeys,
+  updating OAuth/origins/DNS and repeating Session 23; after onboarding,
+  a redirect preserves navigation but cannot migrate passkeys.
+- Complete Session 23's Vercel web, Railway API, Neon Postgres and real Google
+  OAuth deployment, then verify rollback, monitoring, backups and restore per
+  `DEPLOYMENT.md`.
+
+This gate remains part of Phase 1 completion, not a Phase 2 feature. Phase 2
+may begin only after its evidence is recorded in `IDent_STATE.md`.
+
 ## Receiptless — Commerce & Receipts (separate repo, early integration target)
 
 Not a numbered phase, deliberately: unlike Phases 1–10, this isn't an

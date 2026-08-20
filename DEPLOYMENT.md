@@ -1,10 +1,15 @@
 # Deploying IDent
 
-**Status: nothing is deployed, and no hosting has been chosen.** This
-runbook exists so that the decision, when it is made, is the only thing
-left to do — external review item 4 named the missing production
-foundation as a blocker, and half of that blocker was that no procedure
-existed to follow.
+**Status: nothing is deployed.** Vercel (web), Railway (API) and Neon
+(Postgres) were selected on 2026-08-20, with `ident.best` selected as the
+production domain. It was available at Spaceship for EGP 75.30 in year one
+and EGP 950.50/year on renewal, but is not reserved and must be re-checked
+at checkout. No real users may be onboarded before the domain decision
+window ends on 2026-09-03; changing it before then means deleting test
+passkeys and repeating this runbook. This runbook makes the external setup
+explicit — external review item 4 named the missing production foundation
+as a blocker, and half of that blocker was that no procedure existed to
+follow.
 
 Written session 22c (2026-08-16), ported from Receiptless's runbook of
 the same name, which has been through a real deployment and a real
