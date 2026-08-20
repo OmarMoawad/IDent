@@ -117,6 +117,44 @@ export async function findConnectedSourceByProviderAccount(
   return rows[0] ?? null;
 }
 
+/**
+ * Completes or reconnects a provider account as one atomic write. The
+ * conflict target is the database's provider-account identity key, so two
+ * callbacks completing together converge on one row instead of racing a
+ * prior lookup against separate inserts.
+ */
+export async function upsertConnectedSourceConnection(input: {
+  identityId: string;
+  provider: string;
+  providerAccountId: string;
+  providerAccountEmail: string | null;
+  encryptedTokenData: string;
+}): Promise<ConnectedSource> {
+  const now = new Date();
+  const [row] = await db
+    .insert(connectedSources)
+    .values({
+      identityId: input.identityId,
+      provider: input.provider,
+      providerAccountId: input.providerAccountId,
+      providerAccountEmail: input.providerAccountEmail,
+      encryptedTokenData: input.encryptedTokenData,
+      status: "connected",
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [connectedSources.identityId, connectedSources.provider, connectedSources.providerAccountId],
+      set: {
+        providerAccountEmail: input.providerAccountEmail,
+        encryptedTokenData: input.encryptedTokenData,
+        status: "connected",
+        updatedAt: now,
+      },
+    })
+    .returning(connectedSourceColumns);
+  return row;
+}
+
 const messageColumns = {
   id: messages.id,
   identityId: messages.identityId,

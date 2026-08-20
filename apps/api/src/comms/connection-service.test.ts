@@ -17,7 +17,10 @@ import {
   buildConnectorRegistry,
   gmailConnector,
 } from "./connector-registry.js";
-import { findConnectedSourceEncryptedTokenData, findConnectedSourcesByIdentity } from "./store.js";
+import {
+  findConnectedSourceEncryptedTokenData,
+  findConnectedSourcesByIdentity,
+} from "./store.js";
 import { FakeOAuthConnectorClient } from "./test-support/fake-oauth-connector.js";
 import { decryptTokenPayload } from "./token-encryption.js";
 
@@ -36,14 +39,18 @@ import { decryptTokenPayload } from "./token-encryption.js";
 
 const PROVIDER_ID = "fakeworkspace";
 
-function testRegistry(client: FakeOAuthConnectorClient) {
+function testRegistry(
+  client: FakeOAuthConnectorClient,
+  options: { tokenStrategy?: "refresh-required" | "static"; fallbackScope?: string } = {},
+) {
   return buildConnectorRegistry([
     gmailConnector,
     {
       id: PROVIDER_ID,
       displayName: "Fake Workspace",
       feeds: ["messages"],
-      fallbackScope: "channels:history",
+      fallbackScope: options.fallbackScope ?? "channels:history",
+      tokenStrategy: options.tokenStrategy ?? "refresh-required",
       client,
     },
   ]);
@@ -123,6 +130,74 @@ describe("connection-service: a provider that is not Gmail", () => {
     await app.close();
   });
 
+  it("connects and uses a static credential without a refresh token or expiry", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const client = new FakeOAuthConnectorClient();
+    client.nextExchangeResult = {
+      accessToken: "static-workspace-token",
+      refreshToken: null,
+      expiresAt: null,
+      scope: "channels:history",
+    };
+    const registry = testRegistry(client, { tokenStrategy: "static" });
+
+    const { authorizationUrl } = await startConnection(identityId, PROVIDER_ID, { registry });
+    const source = await completeConnection(
+      PROVIDER_ID,
+      "fake-auth-code",
+      extractState(authorizationUrl),
+      { registry },
+    );
+    const active = await getActiveAccessToken(identityId, source.id, { registry });
+
+    expect(active.accessToken).toBe("static-workspace-token");
+    expect(client.refreshAccessTokenCalls).toHaveLength(0);
+    await disconnectSource(identityId, source.id, { registry });
+    expect(client.revokeTokenCalls).toEqual(["static-workspace-token"]);
+    await app.close();
+  });
+
+  it.each([
+    ["a blank access token", { accessToken: "   " }],
+    ["a blank account id", { accountId: "   " }],
+    ["an invalid expiry", { expiresAt: new Date(Number.NaN) }],
+    ["no usable scope", { scope: "", fallbackScope: "" }],
+  ])(
+    "rejects normalized connector output with %s",
+    async (
+      _label,
+      malformed: Partial<{
+        accessToken: string;
+        accountId: string;
+        expiresAt: Date;
+        scope: string;
+        fallbackScope: string;
+      }>,
+    ) => {
+      const app = buildApp();
+      const identityId = await createTestIdentity(app);
+      const client = new FakeOAuthConnectorClient();
+      client.nextExchangeResult = {
+        accessToken: malformed.accessToken ?? "workspace-access-token",
+        refreshToken: "workspace-refresh-token",
+        expiresAt: malformed.expiresAt ?? new Date(Date.now() + 3600_000),
+        scope: malformed.scope ?? "channels:history",
+      };
+      client.nextAccount = {
+        id: malformed.accountId ?? "U024BE7LH",
+        email: "Acme workspace",
+      };
+      const registry = testRegistry(client, { fallbackScope: malformed.fallbackScope });
+      const { authorizationUrl } = await startConnection(identityId, PROVIDER_ID, { registry });
+
+      await expect(
+        completeConnection(PROVIDER_ID, "fake-auth-code", extractState(authorizationUrl), { registry }),
+      ).rejects.toThrow(/invalid connector output/i);
+      await app.close();
+    },
+  );
+
   it("reconnecting the same account updates the row instead of adding one", async () => {
     const app = buildApp();
     const identityId = await createTestIdentity(app);
@@ -134,6 +209,46 @@ describe("connection-service: a provider that is not Gmail", () => {
     const sources = await findConnectedSourcesByIdentity(identityId);
     expect(sources.filter((source) => source.provider === PROVIDER_ID)).toHaveLength(1);
 
+    await app.close();
+  });
+
+  it("refreshes the human-readable account label when reconnecting", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const client = new FakeOAuthConnectorClient();
+
+    const original = await connect(identityId, client);
+    client.nextAccount = { id: "U024BE7LH", email: "Renamed workspace" };
+    const reconnected = await connect(identityId, client);
+    const [stored] = (await findConnectedSourcesByIdentity(identityId)).filter(
+      (source) => source.provider === PROVIDER_ID,
+    );
+
+    expect(reconnected.id).toBe(original.id);
+    expect(reconnected.providerAccountEmail).toBe("Renamed workspace");
+    expect(stored.providerAccountEmail).toBe("Renamed workspace");
+    await app.close();
+  });
+
+  it("atomically completes concurrent connections to the same provider account", async () => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const client = new FakeOAuthConnectorClient();
+    client.accountBarrierSize = 2;
+    const registry = testRegistry(client);
+    const first = await startConnection(identityId, PROVIDER_ID, { registry });
+    const second = await startConnection(identityId, PROVIDER_ID, { registry });
+
+    const completed = await Promise.all([
+      completeConnection(PROVIDER_ID, "first-code", extractState(first.authorizationUrl), { registry }),
+      completeConnection(PROVIDER_ID, "second-code", extractState(second.authorizationUrl), { registry }),
+    ]);
+    const sources = (await findConnectedSourcesByIdentity(identityId)).filter(
+      (source) => source.provider === PROVIDER_ID,
+    );
+
+    expect(completed[0].id).toBe(completed[1].id);
+    expect(sources).toHaveLength(1);
     await app.close();
   });
 
@@ -156,7 +271,7 @@ describe("connection-service: a provider that is not Gmail", () => {
     client.nextExchangeResult = {
       accessToken: "stale-access-token",
       refreshToken: "workspace-refresh-token",
-      expiresAt: new Date(Date.now() - 60_000),
+      expiresAt: new Date(Date.now() + 30_000),
       scope: "channels:history users:read",
     };
     await connect(identityId, client);
@@ -170,6 +285,29 @@ describe("connection-service: a provider that is not Gmail", () => {
     // Not rotated on this refresh, so the original must survive.
     expect(stored.refreshToken).toBe("workspace-refresh-token");
 
+    await app.close();
+  });
+
+  it.each([
+    ["a blank access token", { accessToken: "   ", expiresAt: new Date(Date.now() + 3600_000) }],
+    ["an invalid expiry", { accessToken: "refreshed-token", expiresAt: new Date(Number.NaN) }],
+  ])("rejects a refresh response with %s", async (_label, refreshed) => {
+    const app = buildApp();
+    const identityId = await createTestIdentity(app);
+    const client = new FakeOAuthConnectorClient();
+    const registry = testRegistry(client);
+    client.nextExchangeResult = {
+      accessToken: "nearly-expired-token",
+      refreshToken: "workspace-refresh-token",
+      expiresAt: new Date(Date.now() + 30_000),
+      scope: "channels:history",
+    };
+    const source = await connect(identityId, client);
+    client.nextRefreshResult = { ...refreshed, refreshToken: null };
+
+    await expect(getActiveAccessToken(identityId, source.id, { registry })).rejects.toThrow(
+      /invalid connector output/i,
+    );
     await app.close();
   });
 
@@ -265,8 +403,8 @@ describe("connector-registry", () => {
     const client = new FakeOAuthConnectorClient();
     expect(() =>
       buildConnectorRegistry([
-        { id: "dup", displayName: "One", feeds: ["messages"], fallbackScope: "a", client },
-        { id: "dup", displayName: "Two", feeds: ["messages"], fallbackScope: "b", client },
+        { id: "dup", displayName: "One", feeds: ["messages"], fallbackScope: "a", tokenStrategy: "static", client },
+        { id: "dup", displayName: "Two", feeds: ["messages"], fallbackScope: "b", tokenStrategy: "static", client },
       ]),
     ).toThrow(/Duplicate connector id/);
   });

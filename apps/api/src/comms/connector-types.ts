@@ -20,7 +20,8 @@ export type ExchangedTokens = {
    * asks for one explicitly.
    */
   refreshToken: string | null;
-  expiresAt: Date;
+  /** Null for a connector whose credential is static and does not expire. */
+  expiresAt: Date | null;
   scope: string;
 };
 
@@ -63,3 +64,5 @@ export interface OAuthConnectorClient {
 
 /** What a connector contributes to the unified inbox, for display and routing. */
 export type ConnectorFeed = "mail" | "calendar" | "messages" | "documents";
+
+export type ConnectorTokenStrategy = "refresh-required" | "static";

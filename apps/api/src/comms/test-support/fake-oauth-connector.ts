@@ -22,6 +22,8 @@ export class FakeOAuthConnectorClient implements OAuthConnectorClient {
   exchangeCodeForTokensCalls: { code: string; codeVerifier: string }[] = [];
   refreshAccessTokenCalls: string[] = [];
   revokeTokenCalls: string[] = [];
+  accountBarrierSize = 0;
+  private accountBarrierWaiters: Array<() => void> = [];
 
   constructor(private readonly authorizationBase = "https://provider.test/oauth/authorize") {}
 
@@ -67,6 +69,14 @@ export class FakeOAuthConnectorClient implements OAuthConnectorClient {
   }
 
   async getAccount(): Promise<ConnectedAccount> {
+    if (this.accountBarrierSize > 0) {
+      await new Promise<void>((resolve) => {
+        this.accountBarrierWaiters.push(resolve);
+        if (this.accountBarrierWaiters.length === this.accountBarrierSize) {
+          for (const release of this.accountBarrierWaiters.splice(0)) release();
+        }
+      });
+    }
     if (this.nextAccount instanceof Error) throw this.nextAccount;
     return this.nextAccount;
   }

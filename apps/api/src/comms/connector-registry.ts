@@ -1,5 +1,9 @@
 import { GMAIL_SCOPE, GOOGLE_CALENDAR_SCOPE } from "./comms-config.js";
-import type { ConnectorFeed, OAuthConnectorClient } from "./connector-types.js";
+import type {
+  ConnectorFeed,
+  ConnectorTokenStrategy,
+  OAuthConnectorClient,
+} from "./connector-types.js";
 import { googleOAuthClient } from "./google-oauth-client.js";
 
 /**
@@ -29,6 +33,7 @@ export type Connector = {
    * own parameter names apply.
    */
   readonly fallbackScope: string;
+  readonly tokenStrategy: ConnectorTokenStrategy;
   readonly client: OAuthConnectorClient;
 };
 
@@ -74,6 +79,7 @@ export const gmailConnector: Connector = {
   displayName: "Gmail",
   feeds: ["mail", "calendar"],
   fallbackScope: `${GMAIL_SCOPE} ${GOOGLE_CALENDAR_SCOPE}`,
+  tokenStrategy: "refresh-required",
   client: googleOAuthClient,
 };
 

@@ -11,11 +11,10 @@ import {
   clearConnectedSourceTokens,
   consumeOauthStateChallenge,
   findConnectedSourceById,
-  findConnectedSourceByProviderAccount,
   findConnectedSourceEncryptedTokenData,
-  insertConnectedSource,
   insertOauthStateChallenge,
   setConnectedSourceTokens,
+  upsertConnectedSourceConnection,
 } from "./store.js";
 import { decryptTokenPayload, encryptTokenPayload } from "./token-encryption.js";
 
@@ -87,12 +86,39 @@ export class MissingRefreshTokenError extends Error {
  * accessToken/expiresAt in place and only touches refreshToken if the
  * provider actually rotated it.
  */
-type StoredTokenPayload = {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: string; // ISO
-  scope: string;
-};
+type StoredTokenPayload =
+  | { strategy: "static"; accessToken: string; scope: string }
+  | {
+      strategy: "refresh-required";
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: string;
+      scope: string;
+    };
+
+export class ConnectorOutputInvalidError extends Error {
+  constructor(providerId: string, detail: string) {
+    super(`Invalid connector output from ${providerId}: ${detail}.`);
+    this.name = "ConnectorOutputInvalidError";
+  }
+}
+
+function requiredText(value: string, providerId: string, field: string, maxLength: number): string {
+  const normalized = value.trim();
+  if (!normalized || normalized.length > maxLength) {
+    throw new ConnectorOutputInvalidError(providerId, `${field} must be 1-${maxLength} characters`);
+  }
+  return normalized;
+}
+
+function accountLabel(value: string | null, providerId: string): string | null {
+  if (value === null) return null;
+  return requiredText(value, providerId, "account label", 512);
+}
+
+function parseStoredTokenPayload(serialized: string): StoredTokenPayload {
+  return JSON.parse(serialized) as StoredTokenPayload;
+}
 
 /**
  * PKCE (session 14.5, RFC 7636): a fresh, high-entropy verifier per
@@ -171,7 +197,9 @@ export async function completeConnection(
   if (!consumed || consumed.provider !== connector.id) throw new OauthStateInvalidError();
 
   const tokens = await connector.client.exchangeCodeForTokens(code, consumed.pkceVerifier);
-  if (!tokens.refreshToken) {
+  const accessToken = requiredText(tokens.accessToken, connector.id, "access token", 16_384);
+  const scope = requiredText(tokens.scope || connector.fallbackScope, connector.id, "scope", 4_096);
+  if (connector.tokenStrategy === "refresh-required" && !tokens.refreshToken?.trim()) {
     // Google's getAuthorizationUrl always requests prompt=consent
     // specifically to guarantee a refresh token comes back — treated as a
     // hard failure rather than silently storing a connection that can't
@@ -179,35 +207,37 @@ export async function completeConnection(
     throw new MissingRefreshTokenError(connector.id);
   }
 
-  const account = await connector.client.getAccount(tokens.accessToken);
-
-  const payload: StoredTokenPayload = {
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-    expiresAt: tokens.expiresAt.toISOString(),
-    scope: tokens.scope || connector.fallbackScope,
-  };
-  const encrypted = encryptTokenPayload(JSON.stringify(payload));
-
-  const existing = await findConnectedSourceByProviderAccount(
-    consumed.identityId,
-    connector.id,
-    account.id,
-  );
-  if (existing) {
-    await setConnectedSourceTokens(existing.id, encrypted);
-    return { ...existing, status: "connected" };
+  if (
+    connector.tokenStrategy === "refresh-required" &&
+    (!(tokens.expiresAt instanceof Date) ||
+      !Number.isFinite(tokens.expiresAt.getTime()) ||
+      tokens.expiresAt.getTime() <= Date.now())
+  ) {
+    throw new ConnectorOutputInvalidError(connector.id, "expiry must be a valid future date");
   }
 
-  const source = await insertConnectedSource({
+  const account = await connector.client.getAccount(accessToken);
+  const accountId = requiredText(account.id, connector.id, "account id", 512);
+  const email = accountLabel(account.email, connector.id);
+
+  const payload: StoredTokenPayload = connector.tokenStrategy === "static"
+    ? { strategy: "static", accessToken, scope }
+    : {
+        strategy: "refresh-required",
+        accessToken,
+        refreshToken: tokens.refreshToken!.trim(),
+        expiresAt: tokens.expiresAt!.toISOString(),
+        scope,
+      };
+  const encrypted = encryptTokenPayload(JSON.stringify(payload));
+
+  return upsertConnectedSourceConnection({
     identityId: consumed.identityId,
     provider: connector.id,
-    providerAccountId: account.id,
-    providerAccountEmail: account.email ?? undefined,
+    providerAccountId: accountId,
+    providerAccountEmail: email,
+    encryptedTokenData: encrypted,
   });
-  await setConnectedSourceTokens(source.id, encrypted);
-
-  return { ...source, status: "connected" };
 }
 
 export type ActiveAccessToken = {
@@ -242,7 +272,10 @@ export async function getActiveAccessToken(
   const encrypted = await findConnectedSourceEncryptedTokenData(sourceId);
   if (source.status !== "connected" || !encrypted) throw new ConnectedSourceNotConnectedError();
 
-  const payload = JSON.parse(decryptTokenPayload(encrypted)) as StoredTokenPayload;
+  const payload = parseStoredTokenPayload(decryptTokenPayload(encrypted));
+  if (payload.strategy === "static") {
+    return { accessToken: payload.accessToken, scope: payload.scope };
+  }
   const expiresAt = new Date(payload.expiresAt);
   const needsRefresh = expiresAt.getTime() - ACCESS_TOKEN_REFRESH_BUFFER_MS <= Date.now();
   if (!needsRefresh) {
@@ -250,12 +283,29 @@ export async function getActiveAccessToken(
   }
 
   const refreshed = await connector.client.refreshAccessToken(payload.refreshToken);
+  const refreshedAccessToken = requiredText(
+    refreshed.accessToken,
+    connector.id,
+    "refreshed access token",
+    16_384,
+  );
+  if (
+    !(refreshed.expiresAt instanceof Date) ||
+    !Number.isFinite(refreshed.expiresAt.getTime()) ||
+    refreshed.expiresAt.getTime() <= Date.now()
+  ) {
+    throw new ConnectorOutputInvalidError(connector.id, "refreshed expiry must be a valid future date");
+  }
+  const rotatedRefreshToken = refreshed.refreshToken === null
+    ? payload.refreshToken
+    : requiredText(refreshed.refreshToken, connector.id, "refreshed refresh token", 16_384);
   const updatedPayload: StoredTokenPayload = {
-    accessToken: refreshed.accessToken,
+    strategy: "refresh-required",
+    accessToken: refreshedAccessToken,
     // Only replaced if the provider actually rotated it on this refresh —
     // most refresh responses don't include a new one, and the old one is
     // still valid until the provider says otherwise.
-    refreshToken: refreshed.refreshToken ?? payload.refreshToken,
+    refreshToken: rotatedRefreshToken,
     expiresAt: refreshed.expiresAt.toISOString(),
     scope: payload.scope,
   };
@@ -284,10 +334,9 @@ export async function disconnectSource(
 
   const encrypted = await findConnectedSourceEncryptedTokenData(sourceId);
   if (encrypted) {
-    const payload = JSON.parse(decryptTokenPayload(encrypted)) as StoredTokenPayload;
-    // Revoking either token revokes both, per Google's OAuth semantics —
-    // prefer the refresh token (kills the longer-lived credential).
-    await connector.client.revokeToken(payload.refreshToken || payload.accessToken).catch(() => undefined);
+    const payload = parseStoredTokenPayload(decryptTokenPayload(encrypted));
+    const revokeToken = payload.strategy === "static" ? payload.accessToken : payload.refreshToken;
+    await connector.client.revokeToken(revokeToken).catch(() => undefined);
   }
 
   await clearConnectedSourceTokens(sourceId);
