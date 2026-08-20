@@ -29,6 +29,13 @@ Recorded 2026-08-20:
   8080 (the initial 4000 target produced a useful 502 and was corrected).
 - Railway is on a 30-day/$5 trial and displays "Upgrade to keep services
   online." No payment method or paid plan was authorized.
+- Google Cloud project `ident-best-prod` is personally owned by
+  `okamel1000@gmail.com`, with an External/Testing OAuth app, that address as
+  the sole test user, and production origin/callback URLs. The client ID,
+  rotated client secret and redirect URI are masked Railway variables; the
+  post-change deployment returned a healthy readiness response. Keep the old
+  secret enabled only until the first real consent round trip succeeds, then
+  disable and delete it in Google Cloud.
 
 Written session 22c (2026-08-16), ported from Receiptless's runbook of
 the same name, which has been through a real deployment and a real

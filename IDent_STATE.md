@@ -59,13 +59,21 @@ see [OPERATIONS.md](OPERATIONS.md).
 > manual checks remain exactly that: backup/restore, centralized logs,
 > rollback, and real Google consent.
 >
-> Still required before Session 23 can close: a real Google OAuth client and
-> consent round trip; centralized log evidence; an independent backup and
-> restore rehearsal; and a rollback rehearsal. Google Cloud project creation
-> is paused because the signed-in AUC account requires an organization/folder
-> parent even when "No organization" is selected. Do not silently place the
-> production OAuth project under `aucegypt.edu`; use a personally controlled
-> Google account or obtain Omar's explicit ownership decision. Railway is
+> Google OAuth infrastructure was completed on 2026-08-21 under Omar's
+> personally controlled `okamel1000@gmail.com` account: project
+> `ident-best-prod` (`IDent Production`), External/Testing audience, IDent
+> branding, `okamel1000@gmail.com` as the sole test user, and a Web application
+> client with origin `https://ident.best` and callback
+> `https://api.ident.best/identity/connections/gmail/callback`. A newly rotated
+> client secret and the client ID/redirect URI are stored only as masked
+> Railway variables. The replacement deployment became Online and `/health`
+> remained fully healthy. The older secret remains enabled until a real
+> consent round trip proves the new one, after which it should be disabled and
+> deleted.
+>
+> Still required before Session 23 can close: the real Google consent round
+> trip; centralized log evidence; an independent backup and restore rehearsal;
+> and a rollback rehearsal. Railway is
 > also on a 30-day/$5 trial and warns that an upgrade is required to keep the
 > service online; no payment was authorized or added.
 >
