@@ -264,8 +264,13 @@ Kept explicit, in the same spirit as the rest of `SECURITY.md`:
 ## Prerequisites before any of this is built
 
 1. This document reviewed by someone who did not write it.
-2. The enumerated action set agreed and written down — starting as small
-   as is useful, because every entry is permanent attack surface.
+2. ~~The enumerated action set agreed and written down~~ — **done
+   2026-08-21, see [write-action-catalogue.md](write-action-catalogue.md).**
+   v1 is `reply.draft`, `message.archive` and `calendar.event.accept`,
+   with sending, forwarding, deletion and all standing changes
+   deliberately excluded. Each entry carries its own step-up requirement,
+   retry eligibility, aggregation limits and compensation policy, which
+   is what makes session 5 estimable.
 3. Rate limiting on the confirm and execute endpoints, **stated as
    numbers and tighter than the per-action aggregation thresholds**
    (review F2). The original wording — "their own buckets rather than the
@@ -295,9 +300,9 @@ Kept explicit, in the same spirit as the rest of `SECURITY.md`:
    by accident, because nothing depends on it yet. When session 5 lands,
    that file is **edited, never deleted**: the expectation becomes at
    most a pending action awaiting human approval.
-9. The enumerated action set (prerequisite 2) has a proposed starting
-   list in the review — `reply.draft`, `message.archive`,
-   `calendar.event.accept`, with sending deliberately excluded from v1.
-   **Needs Omar**; it is a product decision, and everything per-action
-   (audit schema, aggregation thresholds, retry eligibility,
-   compensation policy) is sized by it.
+9. ~~The enumerated action set (prerequisite 2)~~ — **agreed by Omar
+   2026-08-21 and recorded in
+   [write-action-catalogue.md](write-action-catalogue.md).** Note the
+   dependency it creates: no v1 action requires step-up, so F1 is not
+   blocking for v1 — but every *excluded* action requires it, so F1 must
+   be built before any of them is promoted into v2.
