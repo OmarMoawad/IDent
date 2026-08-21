@@ -1,10 +1,16 @@
 import "./load-env.js";
 import { GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET } from "./comms/comms-config.js";
 import { buildApp } from "./app.js";
+import { isDeployedEnvironment } from "./deployment.js";
 
 const port = Number(process.env.PORT ?? 4000);
 
-const app = buildApp();
+// The selected production host (Railway) terminates TLS at its reverse proxy
+// and overwrites X-Forwarded-For. Trusting that address is what makes the
+// Postgres-backed IP rate-limit buckets belong to callers rather than to the
+// proxy itself. Local development remains direct and must not trust a caller-
+// supplied forwarding header.
+const app = buildApp({ trustProxy: isDeployedEnvironment() });
 
 // Gmail OAuth is optional infrastructure — a server with no Google Cloud
 // project set up should still boot fine for identity-only use

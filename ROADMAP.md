@@ -87,6 +87,91 @@ replace" model before adding anything sensitive.
 **Exit criteria:** daily-driver usable as a notification/inbox aggregator,
 with a working, honestly-described private-assistant upsell.
 
+### Production exit gate — permanent domain and Session 23
+
+Before Phase 2 adds new user-facing surface area, Phase 1 must be exercised
+as a production-like vertical slice. The permanent WebAuthn relying-party
+domain is a hard prerequisite: a registrar cart is not a reservation, and a
+temporary host domain would make passkeys disposable when the origin changes.
+
+- ~~Purchase `ident.best` before Session 23.~~ **Done 2026-08-20:** one
+  year through 2027-08-20, EGP 85.46 charged; auto-renew and private WHOIS
+  are on, no add-on trial was purchased, and the registrar account uses a
+  passkey plus TOTP. Keep recovery on an external address rather than an
+  `@ident.best` inbox.
+- Use `ident.best` for the web app and WebAuthn RP ID, and
+  `api.ident.best` for the API. Do not register test passkeys against a
+  temporary Vercel or Railway hostname.
+- Keep a no-real-users decision window through **2026-09-03**. A domain
+  change inside that window requires deleting test accounts/passkeys,
+  updating OAuth/origins/DNS and repeating Session 23; after onboarding,
+  a redirect preserves navigation but cannot migrate passkeys.
+- **Session 23 completed 2026-08-21:** Vercel web, Railway API and Neon Postgres
+  are deployed; `ident.best` and `api.ident.best` now pass external HTTPS
+  checks. The personally controlled Google OAuth project/client and Railway
+  secrets were completed on 2026-08-21. An independent private Google Drive
+  backup and isolated Postgres 18 restore rehearsal were also completed on
+  2026-08-21, with the checksum and restored object counts recorded in
+  `DEPLOYMENT.md`. The `omartest` owner test identity completed passkey login
+  and real Google consent after Gmail and Calendar APIs were enabled; Railway
+  centralized logs were inspected; and rollback plus forward recovery were
+  rehearsed against production. The external verifier passed all 7/7 automated
+  checks against `api.ident.best` on 2026-08-20.
+  Railway is on a 30-day/$5 trial, so a paid-plan decision is also required
+  before relying on it beyond the trial. See `DEPLOYMENT.md`.
+
+This gate was part of Phase 1 completion, not a Phase 2 feature. Its evidence is
+recorded in `IDent_STATE.md`. The Phase 2 sequencing gate is satisfied **except
+for the two open ends below**, which come before any new session.
+
+### Session 23a — close the deployment gate's two open ends (do this first)
+
+Reviewing Session 23 after it closed found two things that its own notes did
+not record. Neither is new feature work and neither takes long, but both sit
+ahead of Session 24 and ahead of any Phase 2 session: one can take production
+down, and the other means a claimed capability may not exist.
+
+**1. Repoint Railway from `docs/schedule-ident-best` to `main`. Needs Omar.**
+
+Production's API is built from a feature branch. Merging that branch's PR and
+deleting it — the normal end of every session here — removes the ref Railway
+builds from, and the failure surfaces as production going stale or failing its
+next deploy rather than as anything red in GitHub. The same split means the web
+app and the API are currently built from *different* code: Vercel deploys
+`main`, Railway deploys the branch.
+
+The order is the whole point, because `main` is behind the branch by all of
+Session 23:
+
+1. Merge PR #13 so `main` carries Session 23.
+2. Repoint the Railway service to `main`.
+3. Confirm a deploy from `main` passes `/health` and
+   `node scripts/verify-deployment.mjs https://api.ident.best`.
+4. Only then delete the branch.
+
+Repointing before merging would roll production backwards; deleting before
+repointing would leave it with nothing to build. Done when both surfaces
+deploy from `main` and the verifier is green against a `main` build.
+
+**2. Reconcile the backup's zero identity count. Needs Omar.**
+
+The restore rehearsal recovered zero identities from a database that
+`omartest` had registered against earlier in the same session. Both cannot be
+true, and the worse explanation — that the dump came from a database the API
+does not write to — would mean the archive is not a backup of production at
+all.
+
+Until it is settled, the rehearsal proves the schema and migration history
+round-trip and **nothing about data**, which is weaker than the gate claimed.
+Settle it with `node scripts/reconcile-backup.mjs`, which does the whole
+comparison in one command — see `DEPLOYMENT.md` §6 for the three outcomes and
+which one actually closes the gate. Done when it reports RECONCILED and §6
+carries the numbers instead of the caveat.
+
+Only after both are closed does the automation follow-up (daily dumps,
+external uptime alerting, the Railway paid-plan decision) resume its place in
+the queue — and Session 24 stays where it is, behind these.
+
 ## Receiptless — Commerce & Receipts (separate repo, early integration target)
 
 Not a numbered phase, deliberately: unlike Phases 1–10, this isn't an

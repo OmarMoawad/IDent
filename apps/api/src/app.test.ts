@@ -70,3 +70,19 @@ describe("CORS preflight", () => {
     await app.close();
   });
 });
+
+describe("reverse-proxy addressing", () => {
+  it("trusts the platform's forwarded client address when explicitly enabled", async () => {
+    const app = buildApp({ trustProxy: true });
+    app.get("/__test/client-ip", async (request) => ({ ip: request.ip }));
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/__test/client-ip",
+      headers: { "x-forwarded-for": "203.0.113.17" },
+    });
+
+    expect(response.json()).toEqual({ ip: "203.0.113.17" });
+    await app.close();
+  });
+});

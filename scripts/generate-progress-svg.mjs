@@ -16,7 +16,10 @@ import { dirname, resolve } from "node:path";
 const PHASES = [
   { name: "Identity Core & Platform Foundation", status: "done" },
   { name: "Communications Hub", status: "done" },
-  { name: "Productivity & Real-Time Comms", status: "current", sessionsDone: 4, sessionsTotal: 12 },
+  // Session 23 (the production-like deployment gate) closed 2026-08-21
+  // and was not counted at the time — the badge sat a session behind the
+  // STATE file until 2026-08-21.
+  { name: "Productivity & Real-Time Comms", status: "current", sessionsDone: 5, sessionsTotal: 12 },
   { name: "Documents, Credentials & Ed. Profile", status: "pending" },
   { name: "Health Profile", status: "pending" },
   { name: "Finance", status: "pending" },

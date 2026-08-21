@@ -21,10 +21,142 @@ see [OPERATIONS.md](OPERATIONS.md).
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Session 23 — the production-like vertical slice. It is
-> still the next session, it still needs Omar, and nothing below changes
-> that.** Choose a host, register a domain, create a real Google OAuth
-> client. DEPLOYMENT.md §1 is the decision table.
+> **Next action: Session 23a — two gates, before Session 24 and before any
+> Phase 2 session.** Both need Omar, neither is feature work, and both came
+> out of reviewing Session 23 after it closed rather than out of the session
+> itself. See ROADMAP.md "Session 23a" for the full statement.
+>
+> 1. **Repoint Railway from `docs/schedule-ident-best` to `main`.**
+>    Production's API builds from a feature branch, so merging that branch's
+>    PR and deleting it removes the ref Railway builds from — and it would
+>    show up as production going stale, not as anything red in GitHub. The
+>    same split means the web app and the API are built from different code
+>    right now: Vercel deploys `main`, Railway deploys the branch. Order:
+>    merge PR #13 → repoint to `main` → confirm `/health` and
+>    `scripts/verify-deployment.mjs` pass against a `main` build → then
+>    delete the branch. Any other order either rolls production backwards or
+>    leaves it with nothing to build.
+>
+> 2. **Reconcile the backup's zero identity count.** The restore rehearsal
+>    recovered zero identities from a database `omartest` had registered
+>    against in the same session. Run
+>    `DATABASE_URL=... node scripts/reconcile-backup.mjs`, which compares
+>    production against a fresh dump-and-restore in one command.
+>    Until they agree and are non-zero, the backup gate is **not** closed:
+>    what was proven is that the schema and migration history round-trip,
+>    not that data does.
+>
+> Everything else — daily dump automation, external uptime alerting, the
+> Railway paid-plan decision, and Session 24 — waits behind these two.
+>
+> **Session 23 review, 2026-08-21 — three corrections before the PR.**
+> Reviewing the closed session against the repo rather than against its own
+> notes turned up one live risk, one leak the fix had missed, and one
+> number that does not add up:
+>
+> 1. **Production is served from this feature branch**, not `main`
+>    (DEPLOYMENT.md §2). Merging and deleting it — the normal end of a
+>    session here — pulls the ref Railway builds from. Repoint to `main`
+>    *before* merging. **Needs Omar.**
+> 2. **The callback redaction covered one door of two.** It was anchored to
+>    the literal `gmail` path, so the next connector would have leaked its
+>    authorization code on day one; and Fastify's default not-found handler
+>    builds its message from the raw URL and logs it, so a callback arriving
+>    at an unrouted path — a redirect URI typed wrong in a provider console,
+>    a renamed route — wrote a live code into the log and echoed it back to
+>    the browser, through a door the serializer never saw. Both are fixed
+>    and both are now covered by tests.
+> 3. **The backup restored zero identities while `omartest` existed.**
+>    Unreconciled; see DEPLOYMENT.md §6. **Needs Omar.**
+>
+> The progress badge was also a session behind: Session 23 closed without
+> `generate-progress-svg.mjs` being bumped, so it read 21% for work that
+> puts the phase at 5/12.
+>
+> One wording note, since this file is the resumability contract: "the full
+> test suite passed" is **329 API tests passed and 3 skipped**, plus 35 web
+> tests. The three are `assistant-live.test.ts`, gated behind
+> `skipIf(!hasProvider)` — they need a real provider key, so the live
+> assistant path has never run in CI. That is a deliberate design, not a
+> failure, but it is not the same thing as everything having run.
+>
+> **Session 23 completed on 2026-08-21 — the production-like gate is closed.**
+> `ident.best` was purchased from Spaceship on 2026-08-20 for one year,
+> expiring/renewing on 2027-08-20. The final first-year charge was EGP
+> 85.46. Auto-renew is on (the domain manager displayed EGP 960.63 at
+> verification), WHOIS privacy is private, no hosting/email trial was
+> added, and the registrar account is protected by an iCloud Keychain
+> passkey plus TOTP. `ident.best` is the selected
+> production domain, with a final reconsideration window through
+> **2026-09-03**. No real users may be onboarded during that window: a
+> change requires deleting test passkeys and repeating Session 23 against
+> the replacement domain.
+>
+> On 2026-08-20 the API was deployed to Railway from
+> `docs/schedule-ident-best` at commit `e0dda13`, backed by a Neon Postgres
+> 18 project in Frankfurt. Railway ran the migrations as a pre-deploy step;
+> its generated endpoint returned `/health` with `status: ok`, `db: ok`, no
+> missing config and no insecure config. `api.ident.best` has its Railway
+> CNAME and ownership TXT records at Spaceship. The first custom-domain
+> request exposed a port mismatch (Railway injected `PORT=8080` while the
+> custom domain targeted 4000); after correcting the target to 8080,
+> `https://api.ident.best/health` returned the same healthy result.
+>
+> The web app was deployed successfully to Vercel as project `i-dent-web`
+> from `main` commit `319b9dd`, with root `apps/web` and
+> `NEXT_PUBLIC_API_URL=https://api.ident.best`. Vercel needed an explicit
+> monorepo build command so `@ident/shared` builds before `@ident/web`.
+> `ident.best` is connected directly to Production (not redirected to
+> `www`) and its required apex A record is live at Spaceship; an external
+> HTTPS request returned 200 with Vercel's certificate/HSTS response. No test
+> account or passkey has been created.
+>
+> The external verifier then passed all 7/7 automated checks against
+> `https://api.ident.best`: readiness, database connectivity, complete and
+> safe configuration, rate limiting, and DELETE CORS preflight. Its four
+> manual checks remain exactly that: backup/restore, centralized logs,
+> rollback, and real Google consent.
+>
+> Google OAuth infrastructure was completed on 2026-08-21 under Omar's
+> personally controlled `okamel1000@gmail.com` account: project
+> `ident-best-prod` (`IDent Production`), External/Testing audience, IDent
+> branding, `okamel1000@gmail.com` as the sole test user, and a Web application
+> client with origin `https://ident.best` and callback
+> `https://api.ident.best/identity/connections/gmail/callback`. A newly rotated
+> client secret and the client ID/redirect URI are stored only as masked
+> Railway variables. The replacement deployment became Online and `/health`
+> remained fully healthy. The owner test identity `omartest` then completed a
+> real passkey login and Google consent round trip. The first callback exposed
+> that Gmail API and Calendar API had not been enabled; both were enabled in
+> `ident-best-prod`, and the retry returned `gmail=connected`. The older client
+> secret was then disabled and permanently deleted, leaving only the verified
+> replacement enabled.
+>
+> The independent-backup gate was completed on 2026-08-21. A 48,607-byte
+> custom-format Neon dump was validated, uploaded to a private folder in
+> Omar's personal Google Drive, and restored into an isolated Postgres 18
+> container. The rehearsal recovered 22 user tables (21 application tables
+> plus Drizzle migrations), all 18 migration records, and zero identity and
+> health rows; the database restore itself took 0.14s. SHA-256
+> is `684b3207ae4157da9a926c2a032e0925f30b7806ceaa3c8e44b20a4065443df8`.
+> **That zero does not reconcile with `omartest` registering against the
+> same production database earlier in this session — see DEPLOYMENT.md §6.
+> Until it is settled the rehearsal proves schema and migration history,
+> not data.**
+> Drive reports the archive as owned by Omar and “Private to you.” The
+> provisional targets are RPO 24 hours and RTO 30 minutes; daily automation
+> remains follow-up operational work.
+>
+> Railway's centralized log explorer was verified with structured request IDs,
+> methods, routes, statuses and timings. The consent rehearsal revealed that
+> OAuth callback codes/state were present in logged query strings; a regression
+> test now proves the request serializer replaces that query with `[redacted]`.
+> Railway rollback restored the previous known-good deployment in 32 seconds
+> (50 seconds through operator-observed public health verification), and forward
+> recovery restored the OAuth-enabled deployment in 24 seconds; `/health` was
+> fully healthy after both. Railway remains on a 30-day/$5 trial and no payment
+> was authorized. Daily backup automation and proactive uptime alerting remain
+> operational follow-up, but they do not reopen the completed rehearsal gate.
 >
 > **Phase 2 session 1 (the connector abstraction) is done, 2026-08-20 —
 > and it was taken out of order deliberately. Read the next paragraph
@@ -96,8 +228,9 @@ see [OPERATIONS.md](OPERATIONS.md).
 > Objective 0 is done: PRs #1–#5 are on `main`, verified by ancestry
 > rather than GitHub's MERGED label; the `agent/*` worktrees are gone.
 
-Last updated: 2026-08-13 — **Session 20: notification ingestion and inbox
-aggregation.**
+Last updated: 2026-08-21 — **Session 23 completed and reviewed; Session 23a
+(Railway repoint + backup reconciliation) is the next action, and both need
+Omar.**
 
 Scoped precisely, because an earlier draft of this entry overclaimed:
 Phase 1's unified notification *ingestion and aggregation* are
