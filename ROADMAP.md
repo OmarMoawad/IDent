@@ -212,7 +212,11 @@ carries the numbers instead of the caveat.
 
 Both are closed, so the automation follow-ups (daily dumps, external uptime
 alerting, the Railway paid-plan decision) resume their place in the queue and
-Session 24 is unblocked.
+Session 24 is unblocked. **Session 24 is now done (2026-08-21)** — the design
+is reviewed in `docs/write-action-design-review.md`, four of its findings are
+folded back into the threat model, and the injection regression exists ahead
+of the write path it guards. Its one open item **needs Omar**: the enumerated
+action set, which sizes everything per-action in Phase 2 session 5.
 
 One thing Session 23a did **not** settle: outbound IPv6 was enabled on Railway
 after the last container was built, and the only merge since was docs-only,

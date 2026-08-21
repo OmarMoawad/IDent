@@ -18,8 +18,10 @@ const PHASES = [
   { name: "Communications Hub", status: "done" },
   // Session 23 (the production-like deployment gate) closed 2026-08-21
   // and was not counted at the time — the badge sat a session behind the
-  // STATE file until 2026-08-21.
-  { name: "Productivity & Real-Time Comms", status: "current", sessionsDone: 5, sessionsTotal: 12 },
+  // STATE file until 2026-08-21. Session 24 (write-action design review)
+  // closed 2026-08-21 and is counted here: it was a design session with a
+  // reviewed deliverable and a regression test, not a deferral.
+  { name: "Productivity & Real-Time Comms", status: "current", sessionsDone: 6, sessionsTotal: 12 },
   { name: "Documents, Credentials & Ed. Profile", status: "pending" },
   { name: "Health Profile", status: "pending" },
   { name: "Finance", status: "pending" },

@@ -44,10 +44,71 @@ live-provider path.
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Session 24 — write-action threat model and design review.**
-> Design only, no implementation, and it needs nothing from anyone. See
-> "Session 24" below for the statement of it. Session 23a is closed, so
-> nothing is blocking it.
+> **Next action: Phase 2 session 6 — the personal storage node.** It is
+> the only remaining Phase 2 session that needs nothing from anyone.
+> Sessions 2, 3 and 4 (Slack, Notion, Drive) each **need Omar** for an
+> app registration or an OAuth scope, and session 5 (assistant write
+> actions) is now design-reviewed but **needs Omar** to agree the
+> enumerated action set before it can be estimated — see F6 below. The
+> design question session 6 must settle before any code is what happens
+> when the node is offline, because that answer decides whether this is a
+> sync protocol or a cache.
+>
+> **Session 24 is done, 2026-08-21 — the write-action design is reviewed,
+> and the injection regression exists ahead of the write path.**
+>
+> The review is `docs/write-action-design-review.md`, done against the
+> repository rather than against the document's own account of itself.
+> The load-bearing decision holds — the model proposes intent, the server
+> constructs the action — and the hardening added earlier the same day
+> closes what a first read would have raised. Six findings, four of them
+> now folded into the threat model itself:
+>
+> 1. **F1 (high): step-up cannot mean "every time".** `ELEVATION_TTL_MS`
+>    is five minutes on the *session*, so one elevation authorises every
+>    action until it expires — and attack 7 in the doc's own list is
+>    precisely a series of actions inside one window. Step-up must be
+>    consumed by a specific pending action. **This is an addition to the
+>    elevation subsystem, not the reuse §4 priced in**; budget it into
+>    session 5 rather than discovering it there.
+> 2. **F3 (high): nothing binds a proposal to the retrieval slice.**
+>    Ownership revalidation passes for every message an identity owns, so
+>    injected text can name a target the user's question never surfaced,
+>    and every other control still passes — with the preview accurate
+>    about the wrong object. The slice's id set must be persisted with the
+>    pending action and membership enforced.
+> 3. **F2 (medium): prerequisite 3's premise was wrong.** Unlisted POSTs
+>    already fall through to `default-write`, so confirm/execute were
+>    never going to be unthrottled. The real argument is the number — 120
+>    per minute is looser than any aggregation threshold, so at the
+>    default the limit never binds.
+> 4. **F4 (low): the guarantee is true but mis-verifiable.**
+>    `importance-service.ts` shares `src/assistant/` and writes
+>    `messagePriorities`; it reads as a counter-example and is not, since
+>    it classifies with a regex and never calls a model. State the
+>    boundary as the seam.
+> 5. **F5: closed.** `write-action-injection.test.ts` now enforces the
+>    structural guarantee `SECURITY.md` has been asserting in prose —
+>    that a model which *complies* with an injected instruction and
+>    reports success still changes nothing. Confirmed non-vacuous by
+>    breaking the seam and watching it fail. Prerequisite 8 had deferred
+>    this to the start of implementation, which is the period the
+>    guarantee is easiest to remove by accident.
+> 6. **F6: open, and it gates estimation. Needs Omar.** The enumerated
+>    action set was never written down, and everything per-action — audit
+>    schema, aggregation thresholds, retry eligibility, compensation
+>    policy — is sized by it. The review proposes `reply.draft`,
+>    `message.archive` and `calendar.event.accept`, with **sending
+>    deliberately excluded from v1**: `reply.draft` exercises the entire
+>    architecture with nothing irreversible, and draft-to-send is then a
+>    decision made against a working system rather than a designed one.
+>    Argue with the list rather than adopting it.
+>
+> **Honest limits on the review**: it is still one reader, and the
+> external review that produced session 22's finding list was worth more
+> than this is. Nothing in the design was tested, because nothing in it
+> is implemented — F5's regression covers the guarantee that exists
+> today, not the design that would replace it.
 >
 > **Session 23a closed 2026-08-21.** Both halves are done and both were
 > verified rather than asserted:
@@ -271,9 +332,12 @@ live-provider path.
 > Objective 0 is done: PRs #1–#5 are on `main`, verified by ancestry
 > rather than GitHub's MERGED label; the `agent/*` worktrees are gone.
 
-Last updated: 2026-08-21 — **Session 23 completed and reviewed; Session 23a
-closed (Railway repointed and verified, backup reconciled at 1 identity).
-Session 24 is next and needs nothing from anyone.**
+Last updated: 2026-08-21 — **Session 24 is done: the write-action design
+is reviewed against the code and the injection regression exists ahead of
+the write path.** Previously: Session 23 completed and reviewed; Session
+23a closed (Railway repointed and verified, backup reconciled at 1
+identity). Next is Phase 2 session 6, the only remaining Phase 2 session
+that needs nothing from anyone.
 
 Scoped precisely, because an earlier draft of this entry overclaimed:
 Phase 1's unified notification *ingestion and aggregation* are
@@ -2430,6 +2494,15 @@ question about them. IDent has no hosting plan at all yet, so that decision
 comes first.
 
 ### Session 24 — write-action threat model and design review (before Phase 2 session 5)
+
+**Done 2026-08-21.** The threat model is
+`docs/write-action-threat-model.md`; the second-reader review is
+`docs/write-action-design-review.md`; the injection regression is
+`apps/api/src/assistant/write-action-injection.test.ts`. Findings F1–F4
+are folded back into the threat model, F5 is closed by the test, and F6
+(the enumerated action set) **needs Omar**. The original statement of the
+session follows, unchanged, because the requirement list is what the
+review was conducted against.
 
 Design only. No implementation until this is reviewed.
 
