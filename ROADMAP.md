@@ -163,10 +163,10 @@ all.
 
 Until it is settled, the rehearsal proves the schema and migration history
 round-trip and **nothing about data**, which is weaker than the gate claimed.
-Settle it by comparing `SELECT count(*) FROM identities;` against production
-with the same count inside a fresh restore of a newly taken dump. Done when
-the two counts agree and are non-zero, and `DEPLOYMENT.md` §6 carries the
-numbers instead of the caveat.
+Settle it with `node scripts/reconcile-backup.mjs`, which does the whole
+comparison in one command — see `DEPLOYMENT.md` §6 for the three outcomes and
+which one actually closes the gate. Done when it reports RECONCILED and §6
+carries the numbers instead of the caveat.
 
 Only after both are closed does the automation follow-up (daily dumps,
 external uptime alerting, the Railway paid-plan decision) resume its place in

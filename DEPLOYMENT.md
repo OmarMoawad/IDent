@@ -206,12 +206,35 @@ schedule exists, the provisional **RPO is 24 hours** and requires a daily dump.
 > verified against an empty dataset cannot show that rows survive it,
 > which is the thing a backup exists to do.
 >
-> To settle it: `SELECT count(*) FROM identities;` against the production
-> connection string, compared with the same count inside a fresh restore
-> of a newly taken dump. If the counts agree and are non-zero, the gate is
-> genuinely closed and this note can be replaced with the numbers. If
-> production is non-zero and the archive is not, the archive is not a
-> backup of production and nothing else in this section holds.
+> To settle it, one command:
+>
+> ```
+> DATABASE_URL='<production url>' node scripts/reconcile-backup.mjs --keep-dump ./backups
+> ```
+>
+> It counts `identities`, `system_health_checks` and Drizzle's migration
+> ledger in production, takes a fresh custom-format dump, restores it into
+> a throwaway `postgres:18` container, counts again, and prints a verdict
+> rather than numbers to interpret. Every statement it runs against
+> production is a `SELECT`, the connection string comes from the
+> environment rather than argv so it stays out of shell history, and the
+> container is removed afterwards.
+>
+> Three outcomes, and only one closes the gate:
+>
+> - **RECONCILED** — counts agree and are non-zero. Replace this note with
+>   the numbers and the checksum it prints.
+> - **MISMATCH** — the archive is not a faithful copy of production. This
+>   section's claim fails outright.
+> - **MATCHED, but zero identities** — the counts agree on nothing. If
+>   `omartest` should exist and does not, `DATABASE_URL` points somewhere
+>   the API does not write, and the same wrong database was dumped. That is
+>   the explanation this note exists to rule out, so do not record a pass
+>   on it.
+>
+> Rehearsed against the local dev database on 2026-08-21 before being
+> handed over: 9,564 identities and 18 migration records round-tripped, so
+> the script's happy path is exercised rather than assumed.
 
 Archive evidence:
 

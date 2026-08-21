@@ -39,8 +39,9 @@ see [OPERATIONS.md](OPERATIONS.md).
 >
 > 2. **Reconcile the backup's zero identity count.** The restore rehearsal
 >    recovered zero identities from a database `omartest` had registered
->    against in the same session. Compare `SELECT count(*) FROM identities;`
->    on production against the same count in a fresh restore of a new dump.
+>    against in the same session. Run
+>    `DATABASE_URL=... node scripts/reconcile-backup.mjs`, which compares
+>    production against a fresh dump-and-restore in one command.
 >    Until they agree and are non-zero, the backup gate is **not** closed:
 >    what was proven is that the schema and migration history round-trip,
 >    not that data does.
