@@ -5,6 +5,29 @@ instruction "read the repository and continue the currently approved
 roadmap" doesn't work using only what's below, this file is out of date —
 see [OPERATIONS.md](OPERATIONS.md).
 
+## Evidence labels for operational claims
+
+To keep a historical successful check from being mistaken for present-tense
+health, operational evidence in the current-status material uses these labels:
+
+- **Verified now/live** — a reproducible check was run against the named live
+  target now. It expires as evidence when the target or its deployment changes.
+- **CI/repository verified** — an automated result is tied to a repository
+  revision or CI run. It verifies the checked code and test environment, not a
+  live deployment or a provider account.
+- **Operator verified** — a person observed or performed the operation using
+  private infrastructure, credentials, or artifacts. It is useful evidence but
+  is not independently reproducible from this public repository.
+
+Historical entries remain historical unless explicitly relabelled; this is not
+a retroactive claim that every old result has been rerun. **Current
+CI/repository evidence:** GitHub Actions run
+[32479443197](https://github.com/OmarMoawad/IDent/actions/runs/32479443197)
+on commit `f13040c` (2026-08-21) recorded 334 API tests passed, 3
+provider-dependent tests skipped, and 35 web tests passed. The skipped API
+tests require a real provider key; they are not CI coverage of that
+live-provider path.
+
 > **This repository is public as of 2026-08-20, and that does not
 > overturn the review's verdict below.** The review said keep IDent
 > *local/private* — meaning do not **run** it where the public can reach
@@ -29,26 +52,33 @@ see [OPERATIONS.md](OPERATIONS.md).
 > **Session 23a closed 2026-08-21.** Both halves are done and both were
 > verified rather than asserted:
 >
-> 1. **Railway repointed to `main`.** Production builds and serves `main`,
->    confirmed from outside at **8/8** with `running 4bc51f9c43e3 on main`;
->    `docs/schedule-ident-best` is deleted. Auto-deploy, Wait-for-CI and
->    watched paths are now all confirmed working — Railway's status on
+> 1. **Railway repointed to `main`.** **Operator verified (historical,
+>    2026-08-21):** an external run passed **8/8** with
+>    `running 4bc51f9c43e3 on main`;
+>    `docs/schedule-ident-best` is deleted. Wait-for-CI and watched-path
+>    evaluation are confirmed working — Railway's status on
 >    `28744ef` read *"No deployment needed - watched paths not modified"*
 >    for a docs-only merge, which is the correct behaviour and the first
->    time it ever evaluated a `main` commit.
+>    time it ever evaluated a `main` commit. **Automatic Deployments remains
+>    unconfirmed.** This is a deployment-time result, not **verified
+>    now/live** health; rerun `verify-deployment.mjs` before making a
+>    current-health claim.
 >
 >    The lesson worth keeping: **changing Railway's source branch deployed
 >    nothing on its own.** The settings screen read `main` while `/health`
 >    still reported the old branch, across two merges. A manual Deploy
 >    moved it in ~20 seconds. Confirm the deploy, never the setting.
 >
-> 2. **The backup discrepancy is resolved.** `reconcile-backup.mjs`
->    reported **RECONCILED**: production holds 1 identity (`omartest`) and
->    it survives a dump and restore, every counted table matching. So the
->    Session 23 zero was the benign explanation — the dump predated
->    `omartest` — and not a dump from a database the API does not write
->    to. The backup gate is now closed on evidence that **rows** survive,
->    not merely that the schema does. See DEPLOYMENT.md §6.
+> 2. **The backup discrepancy is resolved.** **Operator verified
+>    (historical):** `reconcile-backup.mjs` was reported **RECONCILED**:
+>    production held 1 identity (`omartest`) and it survived a dump and
+>    restore, every counted table matching. The database access and fresh
+>    archive are private artifacts, so this is not reproducible from the
+>    repository alone. The Session 23 zero was therefore the benign
+>    explanation — the dump predated `omartest` — and not a dump from a
+>    database the API does not write to. The backup gate is closed on
+>    operator evidence that **rows** survive, not merely that the schema does.
+>    See DEPLOYMENT.md §6.
 >
 > **Still untested:** outbound IPv6. The toggle was enabled after the last
 > container was built, and the only merge since was docs-only, which
@@ -2415,21 +2445,31 @@ The design must specify, and the threat model must justify:
 - **Server-generated, immutable action payloads** — the model proposes
   intent; the server constructs what actually executes
 - **User and tenant binding** on every pending action
-- **Expiry and one-time execution**
-- **Idempotency**
+- **Approval binding to the exact proposed mutation** — confirmation binds an
+  immutable, canonical server payload (including its version/digest), never a
+  model-written summary or a mutable pending-action id
+- **Expiry, one-time execution, replay resistance and effect-level
+  idempotency** — including concurrent confirms and provider retries
 - **Step-up authentication** for sensitive actions (this repo already has
   elevation — reuse it)
-- **Authorization and target-state revalidation at execution time**, not
-  only at creation
+- **Fresh authorization and target-state revalidation at execution time**, not
+  only at creation: the acting session, delegated scope, elevation and target
+  ownership must still be current when the write begins
 - **A human-readable preview generated independently of model prose**, so
   the confirmation shows what will happen rather than what the model says
   will happen
 - **Defence against hidden or ambiguous parameters** injected into the
   action
-- **Audit logging** of proposal, confirmation and execution
+- **Auditable lifecycle records** of proposal, exact approval, execution,
+  provider result and failure/compensation state
+- **Partial-failure and compensation handling** defined before any
+  assistant-generated write: retries must not duplicate effects, ambiguous
+  provider outcomes must be visible, and any compensating write must itself be
+  constructed, approved and audited
 
-Write the injection test first: a message whose body asks the assistant to
-send mail must, at most, produce a pending action a human has to approve.
+When implementation begins, write the injection test first: a message whose
+body asks the assistant to send mail must, at most, produce a pending action a
+human has to approve.
 
 ## Session 22 outcome (2026-08-14) — evidence, egress tiers, real numbers
 

@@ -198,19 +198,28 @@ build *succeeded*, which stops being the same thing the moment a redeploy
 fails and leaves the previous container serving. Without an
 `--expect-commit` the check is skipped rather than passed vacuously.
 
+Evidence labels in this runbook are deliberately narrower than a bare
+"verified": **verified now/live** means the named command was run against
+the named target now; **CI/repository verified** means an automated result is
+tied to code or a CI run; and **operator verified** means private
+infrastructure, credentials or artifacts were observed by an operator. A
+historical result is not present-tense live health merely because it passed.
+
 Four things it lists as MANUAL and does not check: backups and a
 rehearsed restore, logs actually arriving, a rehearsed rollback, and a
 real Google consent. A green run does not imply any of them — the script
 says so in its own output, because "verified" that quietly excludes the
 hard parts is worse than no claim.
 
-**Rehearsed 2026-08-16 against a local API: 7/7 automated checks passed.**
-That proves the script, not the new deployment. The production run itself is
-now recorded: **2026-08-20 against `https://api.ident.best`, 7/7 automated
-checks passed** (readiness, database, complete/safe configuration, rate
-limiting and DELETE CORS). Backup/restore was then completed manually on
-2026-08-21 as recorded below. Logs, rollback and real Google consent remain
-open and are not implied by the green result.
+**CI/repository verified (historical):** a 2026-08-16 local rehearsal passed
+7/7 automated checks. That proves the script, not a deployment.
+**Operator verified (historical):** the 2026-08-20 run against
+`https://api.ident.best` passed 7/7 automated checks (readiness, database,
+complete/safe configuration, rate limiting and DELETE CORS). Neither result
+is **verified now/live** health; rerun the command above to make that claim.
+Backup/restore was then operator-verified on 2026-08-21 as recorded below.
+Logs, rollback and real Google consent remain open and are not implied by the
+green result.
 
 ## 6. Backups
 
@@ -224,13 +233,16 @@ for the database operation was 0.14s; allow a provisional **RTO of 30 minutes**
 for archive retrieval, operator setup and verification. Until an automated
 schedule exists, the provisional **RPO is 24 hours** and requires a daily dump.
 
-> **Resolved 2026-08-21. The archive is a faithful copy of production.**
+> **Operator verified (historical, 2026-08-21): the archive was reported as a
+> faithful copy of production.**
 >
 > `scripts/reconcile-backup.mjs` reported **RECONCILED**: production holds
 > **1 identity** — `omartest` — and it survives a dump and restore, with
 > every counted table (`identities`, `system_health_checks`, Drizzle's
 > migration ledger) matching on both sides. Fresh archive SHA-256:
 > `240e91466820ca8028c1ce7d3fa282399a97db32123602ea24770680e3c69f13`.
+> The production access and fresh dump are private artifacts, so this result
+> is not reproducible from this repository alone.
 >
 > So the Session 23 rehearsal's zero was the **benign** explanation of the
 > two: the dump was taken before `omartest` registered, not from a
@@ -245,7 +257,10 @@ schedule exists, the provisional **RPO is 24 hours** and requires a daily dump.
 > gate is closed on evidence now rather than on a green run that happened
 > to be empty.
 
-Archive evidence:
+**Initial Session 23 archive evidence (pre-`omartest`):** these details refer
+to the earlier empty-data rehearsal archive, not the later reconciliation
+archive. The later reconciliation archive is identified by the
+`240e9146…c69f13` checksum in the operator-verified result above.
 
 - File: `ident-production-2026-08-21.dump`
 - Size: 48,607 bytes (Drive displays 47 KB)
@@ -301,14 +316,13 @@ exercised and recorded.
 
 Remaining operational follow-up is explicit rather than part of that gate:
 
-- **Repoint the Railway service from `docs/schedule-ident-best` to `main`
-  before that branch is merged or deleted.** See section 2 — this is the one
-  follow-up that can take production down rather than merely leave it
-  unimproved.
+- **Session 23a is closed:** Railway was repointed to `main`, and the backup
+  discrepancy was reconciled. These are not remaining actions; the historical
+  Railway evidence is in IDent_STATE.md's opening current-status block, the
+  backup evidence is in section 6, and section 5 has the verifier command for
+  a fresh live claim.
 - Railway is still on a 30-day/$5 trial. Choose and authorize a paid plan before
   relying on it beyond the trial; this session did not authorize payment.
-- **Reconcile the backup's zero identity count with `omartest` existing in
-  production**, and re-dump if they disagree. See section 6.
 - Railway's log retention still holds the callback query strings written
   *before* the redaction landed, so the authorization codes and state values
   from the consent rehearsal are in that history. Both are single-use and
