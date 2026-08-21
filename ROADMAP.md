@@ -131,7 +131,7 @@ not record. Neither is new feature work and neither takes long, but both sit
 ahead of Session 24 and ahead of any Phase 2 session: one can take production
 down, and the other means a claimed capability may not exist.
 
-**One of the two is done. The second is still open and still first.**
+**Both are done. Session 23a closed 2026-08-21; nothing here blocks Session 24.**
 
 **1. ~~Repoint Railway from `docs/schedule-ident-best` to `main`.~~ Done
 2026-08-21.**
@@ -177,8 +177,23 @@ deploy from `main` and the verifier is green against a `main` build.
 
 </details>
 
-**2. Reconcile the backup's zero identity count. Needs Omar. Still open, and
-now the only thing between here and Session 24.**
+**2. ~~Reconcile the backup's zero identity count.~~ Done 2026-08-21.**
+
+`reconcile-backup.mjs` reported **RECONCILED**: production holds 1 identity
+(`omartest`), it survives a dump and restore, and every counted table matches
+on both sides. Fresh archive SHA-256
+`240e91466820ca8028c1ce7d3fa282399a97db32123602ea24770680e3c69f13`.
+
+The Session 23 zero was therefore the benign explanation of the two — the dump
+predated `omartest` — rather than a dump taken from a database the API does
+not write to. The distinction mattered: the evidence recorded at the time
+could not tell them apart, and only one of them left the backup claim
+standing. The gate is now closed on rows surviving a restore, which is what a
+backup is for, rather than on a green run that happened to be empty.
+
+<details>
+<summary>The original statement of the problem, kept because the reasoning
+about what an empty restore does and does not prove is reusable</summary>
 
 The restore rehearsal recovered zero identities from a database that
 `omartest` had registered against earlier in the same session. Both cannot be
@@ -193,9 +208,18 @@ comparison in one command — see `DEPLOYMENT.md` §6 for the three outcomes and
 which one actually closes the gate. Done when it reports RECONCILED and §6
 carries the numbers instead of the caveat.
 
-Only after both are closed does the automation follow-up (daily dumps,
-external uptime alerting, the Railway paid-plan decision) resume its place in
-the queue — and Session 24 stays where it is, behind these.
+</details>
+
+Both are closed, so the automation follow-ups (daily dumps, external uptime
+alerting, the Railway paid-plan decision) resume their place in the queue and
+Session 24 is unblocked.
+
+One thing Session 23a did **not** settle: outbound IPv6 was enabled on Railway
+after the last container was built, and the only merge since was docs-only,
+which watched paths correctly skipped. No container has run with it yet. The
+next deploy touching API code is its first test — watch `/health`'s `db` field,
+since a broken IPv6 route to Neon surfaces as `unreachable` rather than as a
+build failure.
 
 ## Receiptless — Commerce & Receipts (separate repo, early integration target)
 

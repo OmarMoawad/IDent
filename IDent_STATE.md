@@ -21,39 +21,46 @@ see [OPERATIONS.md](OPERATIONS.md).
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Session 23a, second half — reconcile the backup's zero
-> identity count.** Needs Omar. It is the last thing between here and
-> Session 24, and it is not feature work.
+> **Next action: Session 24 — write-action threat model and design review.**
+> Design only, no implementation, and it needs nothing from anyone. See
+> "Session 24" below for the statement of it. Session 23a is closed, so
+> nothing is blocking it.
 >
-> The Session 23 restore rehearsal recovered zero identities from a database
-> that `omartest` had registered against earlier in the same session. Both
-> cannot be true, and the worse explanation — a dump taken from a database
-> the API does not write to — would mean the archive is not a backup of
-> production at all. Run:
+> **Session 23a closed 2026-08-21.** Both halves are done and both were
+> verified rather than asserted:
 >
-> ```
-> DATABASE_URL='<production url>' node scripts/reconcile-backup.mjs --keep-dump ./backups
-> ```
+> 1. **Railway repointed to `main`.** Production builds and serves `main`,
+>    confirmed from outside at **8/8** with `running 4bc51f9c43e3 on main`;
+>    `docs/schedule-ident-best` is deleted. Auto-deploy, Wait-for-CI and
+>    watched paths are now all confirmed working — Railway's status on
+>    `28744ef` read *"No deployment needed - watched paths not modified"*
+>    for a docs-only merge, which is the correct behaviour and the first
+>    time it ever evaluated a `main` commit.
 >
-> It compares production against a fresh dump-and-restore in one command and
-> prints a verdict. **"MATCHED, but zero identities" is not a pass** — that
-> is precisely the state Session 23 recorded as success. Until the counts
-> agree *and* are non-zero, the backup gate is **not** closed: what was
-> proven is that the schema and migration history round-trip, not that data
-> does. See DEPLOYMENT.md §6.
+>    The lesson worth keeping: **changing Railway's source branch deployed
+>    nothing on its own.** The settings screen read `main` while `/health`
+>    still reported the old branch, across two merges. A manual Deploy
+>    moved it in ~20 seconds. Confirm the deploy, never the setting.
 >
-> **Done 2026-08-21 — the first half.** Railway was repointed from
-> `docs/schedule-ident-best` to `main`; production builds and serves `main`,
-> verified from outside at **8/8** with `running 4bc51f9c43e3 on main`, and
-> the branch is deleted. The lesson worth keeping: changing Railway's source
-> branch deployed nothing on its own — the settings screen read `main` while
-> `/health` still reported the old branch, across two merges to `main`. A
-> manual Deploy moved it in ~20 seconds. **Confirm the deploy, never the
-> setting**, which is what `/health`'s commit field now makes possible.
-> Whether Automatic Deployments is enabled is still unconfirmed.
+> 2. **The backup discrepancy is resolved.** `reconcile-backup.mjs`
+>    reported **RECONCILED**: production holds 1 identity (`omartest`) and
+>    it survives a dump and restore, every counted table matching. So the
+>    Session 23 zero was the benign explanation — the dump predated
+>    `omartest` — and not a dump from a database the API does not write
+>    to. The backup gate is now closed on evidence that **rows** survive,
+>    not merely that the schema does. See DEPLOYMENT.md §6.
 >
-> Everything else — daily dump automation, external uptime alerting, the
-> Railway paid-plan decision, and Session 24 — waits behind the reconcile.
+> **Still untested:** outbound IPv6. The toggle was enabled after the last
+> container was built, and the only merge since was docs-only, which
+> watched paths correctly skipped — so no container has yet run with it.
+> The next deploy that touches API code is its first test; watch
+> `/health`'s `db` field, and toggle it back off if that reads
+> `unreachable`.
+>
+> Operational follow-ups, none of them blocking: a paid Railway plan
+> before the trial lapses, daily dump automation for the provisional
+> 24-hour RPO, external uptime alerting, and the no-real-users window
+> through **2026-09-03**.
 >
 > **Session 23 review, 2026-08-21 — three corrections before the PR.**
 > Reviewing the closed session against the repo rather than against its own
@@ -234,9 +241,9 @@ see [OPERATIONS.md](OPERATIONS.md).
 > Objective 0 is done: PRs #1–#5 are on `main`, verified by ancestry
 > rather than GitHub's MERGED label; the `agent/*` worktrees are gone.
 
-Last updated: 2026-08-21 — **Session 23 completed and reviewed. Session 23a's
-Railway repoint is done and verified; the backup reconciliation is the next
-action and needs Omar.**
+Last updated: 2026-08-21 — **Session 23 completed and reviewed; Session 23a
+closed (Railway repointed and verified, backup reconciled at 1 identity).
+Session 24 is next and needs nothing from anyone.**
 
 Scoped precisely, because an earlier draft of this entry overclaimed:
 Phase 1's unified notification *ingestion and aggregation* are
