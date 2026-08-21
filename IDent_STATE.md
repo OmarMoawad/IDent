@@ -21,33 +21,39 @@ see [OPERATIONS.md](OPERATIONS.md).
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Session 23a — two gates, before Session 24 and before any
-> Phase 2 session.** Both need Omar, neither is feature work, and both came
-> out of reviewing Session 23 after it closed rather than out of the session
-> itself. See ROADMAP.md "Session 23a" for the full statement.
+> **Next action: Session 23a, second half — reconcile the backup's zero
+> identity count.** Needs Omar. It is the last thing between here and
+> Session 24, and it is not feature work.
 >
-> 1. **Repoint Railway from `docs/schedule-ident-best` to `main`.**
->    Production's API builds from a feature branch, so merging that branch's
->    PR and deleting it removes the ref Railway builds from — and it would
->    show up as production going stale, not as anything red in GitHub. The
->    same split means the web app and the API are built from different code
->    right now: Vercel deploys `main`, Railway deploys the branch. Order:
->    merge PR #13 → repoint to `main` → confirm `/health` and
->    `scripts/verify-deployment.mjs` pass against a `main` build → then
->    delete the branch. Any other order either rolls production backwards or
->    leaves it with nothing to build.
+> The Session 23 restore rehearsal recovered zero identities from a database
+> that `omartest` had registered against earlier in the same session. Both
+> cannot be true, and the worse explanation — a dump taken from a database
+> the API does not write to — would mean the archive is not a backup of
+> production at all. Run:
 >
-> 2. **Reconcile the backup's zero identity count.** The restore rehearsal
->    recovered zero identities from a database `omartest` had registered
->    against in the same session. Run
->    `DATABASE_URL=... node scripts/reconcile-backup.mjs`, which compares
->    production against a fresh dump-and-restore in one command.
->    Until they agree and are non-zero, the backup gate is **not** closed:
->    what was proven is that the schema and migration history round-trip,
->    not that data does.
+> ```
+> DATABASE_URL='<production url>' node scripts/reconcile-backup.mjs --keep-dump ./backups
+> ```
+>
+> It compares production against a fresh dump-and-restore in one command and
+> prints a verdict. **"MATCHED, but zero identities" is not a pass** — that
+> is precisely the state Session 23 recorded as success. Until the counts
+> agree *and* are non-zero, the backup gate is **not** closed: what was
+> proven is that the schema and migration history round-trip, not that data
+> does. See DEPLOYMENT.md §6.
+>
+> **Done 2026-08-21 — the first half.** Railway was repointed from
+> `docs/schedule-ident-best` to `main`; production builds and serves `main`,
+> verified from outside at **8/8** with `running 4bc51f9c43e3 on main`, and
+> the branch is deleted. The lesson worth keeping: changing Railway's source
+> branch deployed nothing on its own — the settings screen read `main` while
+> `/health` still reported the old branch, across two merges to `main`. A
+> manual Deploy moved it in ~20 seconds. **Confirm the deploy, never the
+> setting**, which is what `/health`'s commit field now makes possible.
+> Whether Automatic Deployments is enabled is still unconfirmed.
 >
 > Everything else — daily dump automation, external uptime alerting, the
-> Railway paid-plan decision, and Session 24 — waits behind these two.
+> Railway paid-plan decision, and Session 24 — waits behind the reconcile.
 >
 > **Session 23 review, 2026-08-21 — three corrections before the PR.**
 > Reviewing the closed session against the repo rather than against its own
@@ -228,9 +234,9 @@ see [OPERATIONS.md](OPERATIONS.md).
 > Objective 0 is done: PRs #1–#5 are on `main`, verified by ancestry
 > rather than GitHub's MERGED label; the `agent/*` worktrees are gone.
 
-Last updated: 2026-08-21 — **Session 23 completed and reviewed; Session 23a
-(Railway repoint + backup reconciliation) is the next action, and both need
-Omar.**
+Last updated: 2026-08-21 — **Session 23 completed and reviewed. Session 23a's
+Railway repoint is done and verified; the backup reconciliation is the next
+action and needs Omar.**
 
 Scoped precisely, because an earlier draft of this entry overclaimed:
 Phase 1's unified notification *ingestion and aggregation* are

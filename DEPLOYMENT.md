@@ -13,27 +13,38 @@ follow.
 
 Recorded 2026-08-20:
 
-- Railway project `alert-creativity`, service `@ident/api`, deploys branch
-  `docs/schedule-ident-best`; generated URL
+- Railway project `alert-creativity`, service `@ident/api`, **deploys
+  `main`** (repointed 2026-08-21, see below); generated URL
   `https://identapi-production.up.railway.app` passed `/health`.
 
-  > **Needs Omar, before that branch is merged.** Production is served
-  > from a feature branch, not `main`. Merging its PR and deleting the
-  > branch — the normal end of every session here — removes the ref
-  > Railway builds from, and the failure would show up as production
-  > going stale or failing its next deploy rather than as anything
-  > red in GitHub.
+  > **Done 2026-08-21.** Production was served from the feature branch
+  > `docs/schedule-ident-best` from 2026-08-20 until the repoint. It now
+  > builds and serves `main`, verified from outside rather than from the
+  > dashboard: `verify-deployment.mjs --expect-commit` returned **8/8**
+  > with `running 4bc51f9c43e3 on main`, and `/health` reports the same
+  > commit and branch itself. `docs/schedule-ident-best` has been deleted.
   >
-  > **The order, and it is the whole point** — `main` is behind this branch
-  > by the whole of Session 23, so repointing before merging would roll
-  > production backwards, and deleting before repointing would leave it
-  > with nothing to build:
+  > **Two things the repoint taught, both worth keeping.**
   >
-  > 1. Merge the PR, so `main` carries Session 23. Do not take GitHub's
-  >    offer to delete the branch yet.
-  > 2. Repoint the Railway service to `main`.
-  > 3. Verify the `main` build is the one *serving* (section 5).
-  > 4. Then delete the branch.
+  > *Changing the source branch does not deploy anything.* Railway kept
+  > serving the old container after the setting was changed — the settings
+  > screen read `main` while `/health` still reported
+  > `docs/schedule-ident-best`, for at least five minutes and across two
+  > merges to `main`. A manual **Deploy** was what actually moved it, and
+  > it landed in about 20 seconds. The GitHub commit statuses showed the
+  > same thing independently: Railway had posted a deploy status on every
+  > branch commit and on **no** `main` commit.
+  >
+  > *So confirm the deploy, never the setting.* This is the entire reason
+  > `/health` reports its own commit. "The dashboard says `main`" and
+  > "`main` is serving" were different facts here for a measurable
+  > interval, and only the second one is the one that matters.
+  >
+  > Still open: whether **Automatic Deployments** is enabled for the
+  > service. Two merges to `main` produced no Railway build without a
+  > manual click, so either it is off, or the source change landed after
+  > those merges. If it is off, every future merge stops silently short of
+  > production.
 - Neon project `ident` (`spring-fog-70776779`) is Postgres 18 in Frankfurt;
   the pooled URL is stored only as a masked Railway secret. The free plan's
   six-hour history is not the independent backup required by section 6.
