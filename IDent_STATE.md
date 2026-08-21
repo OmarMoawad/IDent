@@ -44,12 +44,15 @@ live-provider path.
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Phase 2 session 6 — the personal storage node.** It is
-> the only remaining Phase 2 session that needs nothing from anyone.
-> Sessions 2, 3 and 4 (Slack, Notion, Drive) each **need Omar** for an
-> app registration or an OAuth scope, and session 5 (assistant write
-> actions) is now design-reviewed but **needs Omar** to agree the
-> enumerated action set before it can be estimated — see F6 below. The
+> **Next action: Phase 2 session 5 or 6.** Session 5 (assistant write
+> actions) is now unblocked: it is design-reviewed, its action set is
+> agreed, and v1 needs nothing from anyone — no v1 action requires the
+> Google send scope, which is exactly why sending was left out. Session 6
+> (the personal storage node) also needs nothing from anyone. Sessions 2,
+> 3 and 4 (Slack, Notion, Drive) each still **need Omar** for an app
+> registration or an OAuth scope. If taking session 5, build F1 and F3
+> first — F3 is load-bearing for v1, and F1 gates any later promotion out
+> of v1. The
 > design question session 6 must settle before any code is what happens
 > when the node is offline, because that answer decides whether this is a
 > sync protocol or a cache.
@@ -94,15 +97,23 @@ live-provider path.
 >    breaking the seam and watching it fail. Prerequisite 8 had deferred
 >    this to the start of implementation, which is the period the
 >    guarantee is easiest to remove by accident.
-> 6. **F6: open, and it gates estimation. Needs Omar.** The enumerated
->    action set was never written down, and everything per-action — audit
->    schema, aggregation thresholds, retry eligibility, compensation
->    policy — is sized by it. The review proposes `reply.draft`,
->    `message.archive` and `calendar.event.accept`, with **sending
->    deliberately excluded from v1**: `reply.draft` exercises the entire
->    architecture with nothing irreversible, and draft-to-send is then a
->    decision made against a working system rather than a designed one.
->    Argue with the list rather than adopting it.
+> 6. **F6: closed 2026-08-21 — Omar agreed the recommendation.** The
+>    enumerated action set is now `docs/write-action-catalogue.md`: v1 is
+>    `reply.draft`, `message.archive` and `calendar.event.accept`, each
+>    with its own step-up requirement, retry eligibility, aggregation
+>    limits and compensation policy — which is what makes session 5
+>    estimable, since every control in the threat model is specified per
+>    action type. **Sending, forwarding, deletion and all standing
+>    changes are deliberately excluded from v1.** `reply.draft` exercises
+>    the entire architecture with nothing irreversible, so draft-to-send
+>    becomes a decision made against a working system rather than a
+>    designed one.
+>
+>    Closing it surfaced a dependency worth acting on: **no v1 action
+>    requires step-up, so F1 does not block v1** — but every *excluded*
+>    action does, so F1 must be built before any of them is promoted to
+>    v2. F3 (slice membership) is load-bearing from day one, because all
+>    three v1 actions take a target id from the slice.
 >
 > **Honest limits on the review**: it is still one reader, and the
 > external review that produced session 22's finding list was worth more

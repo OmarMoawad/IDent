@@ -152,10 +152,13 @@ changes nothing, no route exists that turns an answer into a write, and
 the seam reaches nothing that mutates. Verified non-vacuous by adding a
 write import to the seam and confirming the test fails.
 
-## F6 — Prerequisite 2 is still open, and it is the one that gates the rest
+## F6 — Prerequisite 2 was open and gated the rest. Closed 2026-08-21.
 
-**Severity: medium. Needs Omar — this is a product decision, not an
-engineering one.**
+**Severity: medium. Was a product decision, not an engineering one —
+Omar agreed the recommendation below on 2026-08-21, and it is now
+recorded in [write-action-catalogue.md](write-action-catalogue.md) with
+each action's step-up requirement, retry eligibility, aggregation limits
+and compensation policy.**
 
 "The enumerated action set agreed and written down" is a prerequisite
 with no proposal against it, and everything else is sized by it: the
@@ -198,5 +201,10 @@ decision made against a working system rather than a designed one.
 Session 24's exit condition — reviewed, not built — is met. Three things
 should land in the threat model before session 5 is planned: the
 elevation binding (F1), the confirm/execute numbers (F2), and slice
-membership as an enforced constraint (F3). F6 needs Omar and blocks
-estimation.
+membership as an enforced constraint (F3).
+
+F6 is closed, and closing it surfaced a dependency worth stating: **no v1
+action requires step-up, so F1 does not block v1** — but every action
+excluded from v1 does require it, so F1 must be built before any of them
+is promoted. Slice membership (F3) is load-bearing from day one, because
+all three v1 actions take a target id from the slice.
