@@ -22,12 +22,18 @@ Recorded 2026-08-20:
   > branch — the normal end of every session here — removes the ref
   > Railway builds from, and the failure would show up as production
   > going stale or failing its next deploy rather than as anything
-  > red in GitHub. **Repoint the Railway service to `main` first, confirm
-  > a deploy from `main` passes `/health`, and only then merge.**
-  > `main` is currently behind this branch by the whole of Session 23, so
-  > repointing before merging would also roll production backwards —
-  > which is why the order is repoint, merge, verify, and not any other
-  > sequence.
+  > red in GitHub.
+  >
+  > **The order, and it is the whole point** — `main` is behind this branch
+  > by the whole of Session 23, so repointing before merging would roll
+  > production backwards, and deleting before repointing would leave it
+  > with nothing to build:
+  >
+  > 1. Merge the PR, so `main` carries Session 23. Do not take GitHub's
+  >    offer to delete the branch yet.
+  > 2. Repoint the Railway service to `main`.
+  > 3. Verify the `main` build is the one *serving* (section 5).
+  > 4. Then delete the branch.
 - Neon project `ident` (`spring-fog-70776779`) is Postgres 18 in Frankfurt;
   the pooled URL is stored only as a masked Railway secret. The free plan's
   six-hour history is not the independent backup required by section 6.
@@ -165,6 +171,21 @@ configuration, that the deployment is new enough to report readiness at
 all, that login is actually rate limited, and that the CORS preflight
 allows DELETE. It reports **every** check rather than stopping at the
 first failure.
+
+**To check *which build* is serving**, pass the commit you expect:
+
+```bash
+node scripts/verify-deployment.mjs https://api.ident.best \
+  --expect-commit $(git rev-parse origin/main)
+```
+
+`/health` reports the commit the running process was built from — Railway
+injects `RAILWAY_GIT_COMMIT_SHA` into every deployment, and the field is
+omitted rather than guessed when no platform provides one. This is the
+check a provider dashboard cannot give you: the dashboard says which
+build *succeeded*, which stops being the same thing the moment a redeploy
+fails and leaves the previous container serving. Without an
+`--expect-commit` the check is skipped rather than passed vacuously.
 
 Four things it lists as MANUAL and does not check: backups and a
 rehearsed restore, logs actually arriving, a rehearsed rollback, and a

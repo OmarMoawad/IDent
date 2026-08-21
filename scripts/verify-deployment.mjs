@@ -17,12 +17,21 @@
  *
  * Usage:
  *   node scripts/verify-deployment.mjs https://api.ident.example
+ *   node scripts/verify-deployment.mjs https://api.ident.example --expect-commit $(git rev-parse origin/main)
+ *
+ * `--expect-commit` answers a question the platform dashboard cannot: not
+ * "did a build from this commit succeed" but "is that commit the one
+ * currently serving". Those come apart whenever a redeploy fails and
+ * leaves the previous container up.
  */
-const BASE = (process.argv[2] || process.env.DEPLOYMENT_URL || "").replace(/\/$/, "");
+const args = process.argv.slice(2);
+const BASE = (args.find((a) => !a.startsWith("--")) || process.env.DEPLOYMENT_URL || "").replace(/\/$/, "");
+const expectCommitIndex = args.indexOf("--expect-commit");
+const EXPECT_COMMIT = expectCommitIndex === -1 ? undefined : args[expectCommitIndex + 1];
 const TIMEOUT_MS = Number(process.env.VERIFY_TIMEOUT_MS || 20_000);
 
 if (!BASE) {
-  console.error("usage: node scripts/verify-deployment.mjs <api-base-url>");
+  console.error("usage: node scripts/verify-deployment.mjs <api-base-url> [--expect-commit <sha>]");
   process.exit(2);
 }
 
@@ -119,7 +128,51 @@ async function checkCors() {
   );
 }
 
+/**
+ * Session 23a. Reads the commit out of the *running* process rather than
+ * out of a dashboard, which is the only version of this check that can
+ * fail honestly: a build can succeed, be recorded as the latest
+ * deployment, and not be the one answering requests.
+ *
+ * Only runs when asked, because most invocations do not have an expected
+ * commit to compare against, and a check that passes vacuously is worse
+ * than one that is absent.
+ */
+async function checkDeployedCommit() {
+  if (!EXPECT_COMMIT) return;
+
+  let payload;
+  try {
+    payload = JSON.parse((await request("/health")).text);
+  } catch {
+    record("Serving the expected commit", false, "could not read /health");
+    return;
+  }
+
+  const running = payload.commit;
+  if (!running) {
+    record(
+      "Serving the expected commit",
+      false,
+      "/health reports no commit — the platform injected none, or this build predates the field",
+    );
+    return;
+  }
+
+  // Compare on the shorter of the two, so a short SHA on either side works.
+  const width = Math.min(running.length, EXPECT_COMMIT.length);
+  const ok = running.slice(0, width) === EXPECT_COMMIT.slice(0, width);
+  record(
+    "Serving the expected commit",
+    ok,
+    ok
+      ? `running ${running.slice(0, 12)}${payload.branch ? ` on ${payload.branch}` : ""}`
+      : `expected ${EXPECT_COMMIT.slice(0, 12)}, serving ${running.slice(0, 12)}${payload.branch ? ` on ${payload.branch}` : ""}`,
+  );
+}
+
 await checkReadiness();
+await checkDeployedCommit();
 await checkRateLimiting();
 await checkCors();
 

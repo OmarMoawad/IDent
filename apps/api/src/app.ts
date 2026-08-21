@@ -14,7 +14,7 @@ import { registerIdentityRoutes } from "./identity/routes.js";
 import { registerWebauthnRoutes } from "./identity/webauthn-routes.js";
 import { ORIGIN } from "./identity/webauthn-config.js";
 import { registerRateLimiting } from "./rate-limit/plugin.js";
-import { readinessFrom } from "./readiness.js";
+import { buildProvenance, readinessFrom } from "./readiness.js";
 
 /**
  * Query parameters that are safe to keep, and worth keeping. `error` and
@@ -150,7 +150,7 @@ export function buildApp(
   app.get("/health", async (): Promise<HealthStatus> => {
     const db = await checkDbHealth();
     const readiness = readinessFrom(db);
-    return { ...readiness, timestamp: new Date().toISOString() };
+    return { ...readiness, ...buildProvenance(), timestamp: new Date().toISOString() };
   });
 
   registerIdentityRoutes(app);

@@ -145,8 +145,10 @@ Session 23:
 
 1. Merge PR #13 so `main` carries Session 23.
 2. Repoint the Railway service to `main`.
-3. Confirm a deploy from `main` passes `/health` and
-   `node scripts/verify-deployment.mjs https://api.ident.best`.
+3. Confirm the `main` build is the one *serving*, not merely the one that
+   built: `node scripts/verify-deployment.mjs https://api.ident.best
+   --expect-commit $(git rev-parse origin/main)`. `/health` reports the
+   running process's own commit, so this does not rely on the dashboard.
 4. Only then delete the branch.
 
 Repointing before merging would roll production backwards; deleting before
