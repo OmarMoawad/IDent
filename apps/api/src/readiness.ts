@@ -98,3 +98,31 @@ export function readinessFrom(db: "ok" | "unreachable", env: NodeJS.ProcessEnv =
     insecureConfig,
   };
 }
+
+/**
+ * The build this process is running, as reported by the platform that
+ * started it.
+ *
+ * Railway injects `RAILWAY_GIT_COMMIT_SHA` and `RAILWAY_GIT_BRANCH` into
+ * every deployment; Vercel's equivalents are read too so the same check
+ * works if the API ever moves. `GIT_COMMIT_SHA` is the manual override
+ * for anywhere else.
+ *
+ * Returns an empty object rather than "unknown" when nothing is set —
+ * `/health` should omit the field locally instead of asserting a fact it
+ * does not have.
+ */
+export function buildProvenance(env: NodeJS.ProcessEnv = process.env): {
+  commit?: string;
+  branch?: string;
+} {
+  const commit =
+    env.RAILWAY_GIT_COMMIT_SHA ?? env.VERCEL_GIT_COMMIT_SHA ?? env.GIT_COMMIT_SHA;
+  const branch =
+    env.RAILWAY_GIT_BRANCH ?? env.VERCEL_GIT_COMMIT_REF ?? env.GIT_BRANCH;
+
+  return {
+    ...(commit?.trim() ? { commit: commit.trim() } : {}),
+    ...(branch?.trim() ? { branch: branch.trim() } : {}),
+  };
+}

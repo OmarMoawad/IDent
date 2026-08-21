@@ -17,6 +17,23 @@ export type HealthStatus = {
    */
   missingConfig?: string[];
   insecureConfig?: string[];
+  /**
+   * Which commit is actually running, reported by the process itself.
+   *
+   * Session 23a: production built from a feature branch for a while, and
+   * the only way to check what was deployed was to read the Railway
+   * dashboard — which says what the platform *believes* it built. A build
+   * that succeeded and a build that is serving are different claims, and
+   * a dashboard cannot tell them apart after a failed redeploy silently
+   * leaves the previous container up.
+   *
+   * Safe to expose on an unauthenticated endpoint: both repos are public
+   * on purpose, so a commit SHA identifies a public object. Absent when
+   * the platform injected nothing — locally, or on a host that does not
+   * provide it — rather than guessed at.
+   */
+  commit?: string;
+  branch?: string;
 };
 
 /** The shape POST /identity/register, /login, and /webauthn/login/verify all return. */
