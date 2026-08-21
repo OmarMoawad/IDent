@@ -70,9 +70,9 @@ Recorded 2026-08-20:
   `684b3207ae4157da9a926c2a032e0925f30b7806ceaa3c8e44b20a4065443df8`.
   A fresh restore into an isolated Postgres 18 container succeeded in 0.14s
   and recovered 22 user tables (21 application tables plus Drizzle's migration
-  table), all 18 migration records, and zero identity/health rows — a count
-  that section 6 flags as unreconciled, since `omartest` should have been in
-  that dump. Google Drive reports the archive as owned by Omar and “Private to you.”
+  table), all 18 migration records, and zero identity/health rows — that dump
+  predated `omartest`, confirmed by the 2026-08-21 reconciliation in section 6.
+  Google Drive reports the archive as owned by Omar and “Private to you.”
 - The owner test identity `omartest` completed passkey registration/login and
   a real Google consent round trip. Enabling Gmail API and Google Calendar API
   in `ident-best-prod` resolved the first callback's expected API-disabled
@@ -224,49 +224,26 @@ for the database operation was 0.14s; allow a provisional **RTO of 30 minutes**
 for archive retrieval, operator setup and verification. Until an automated
 schedule exists, the provisional **RPO is 24 hours** and requires a daily dump.
 
-> **Unresolved, and it weakens the claim above — needs Omar.** The zero
-> identity count does not agree with the rest of this session. The owner
-> test identity `omartest` completed passkey registration and a real
-> Google consent round trip against *this* production deployment, as
-> recorded in section 4 — so a dump of that database should have carried
-> one identity, not none. Either the dump was taken before `omartest`
-> existed, or it was taken from a different database than the API writes
-> to. Both are worth knowing, and the second is much worse.
+> **Resolved 2026-08-21. The archive is a faithful copy of production.**
 >
-> Until it is settled, **this rehearsal proves the schema and the
-> migration history round-trip, and nothing about data.** A restore
-> verified against an empty dataset cannot show that rows survive it,
-> which is the thing a backup exists to do.
+> `scripts/reconcile-backup.mjs` reported **RECONCILED**: production holds
+> **1 identity** — `omartest` — and it survives a dump and restore, with
+> every counted table (`identities`, `system_health_checks`, Drizzle's
+> migration ledger) matching on both sides. Fresh archive SHA-256:
+> `240e91466820ca8028c1ce7d3fa282399a97db32123602ea24770680e3c69f13`.
 >
-> To settle it, one command:
+> So the Session 23 rehearsal's zero was the **benign** explanation of the
+> two: the dump was taken before `omartest` registered, not from a
+> database the API does not write to. Worth stating plainly, because the
+> two possibilities were indistinguishable from the evidence recorded at
+> the time, and only one of them left this section's claim standing.
 >
-> ```
-> DATABASE_URL='<production url>' node scripts/reconcile-backup.mjs --keep-dump ./backups
-> ```
->
-> It counts `identities`, `system_health_checks` and Drizzle's migration
-> ledger in production, takes a fresh custom-format dump, restores it into
-> a throwaway `postgres:18` container, counts again, and prints a verdict
-> rather than numbers to interpret. Every statement it runs against
-> production is a `SELECT`, the connection string comes from the
-> environment rather than argv so it stays out of shell history, and the
-> container is removed afterwards.
->
-> Three outcomes, and only one closes the gate:
->
-> - **RECONCILED** — counts agree and are non-zero. Replace this note with
->   the numbers and the checksum it prints.
-> - **MISMATCH** — the archive is not a faithful copy of production. This
->   section's claim fails outright.
-> - **MATCHED, but zero identities** — the counts agree on nothing. If
->   `omartest` should exist and does not, `DATABASE_URL` points somewhere
->   the API does not write, and the same wrong database was dumped. That is
->   the explanation this note exists to rule out, so do not record a pass
->   on it.
->
-> Rehearsed against the local dev database on 2026-08-21 before being
-> handed over: 9,564 identities and 18 migration records round-tripped, so
-> the script's happy path is exercised rather than assumed.
+> **What actually changed is the strength of the claim, not the outcome.**
+> Session 23 proved the schema and the migration history round-trip.
+> This proves rows do — which is the thing a backup exists to do, and the
+> thing a restore verified against an empty dataset could never show. The
+> gate is closed on evidence now rather than on a green run that happened
+> to be empty.
 
 Archive evidence:
 
