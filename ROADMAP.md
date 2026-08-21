@@ -131,7 +131,27 @@ not record. Neither is new feature work and neither takes long, but both sit
 ahead of Session 24 and ahead of any Phase 2 session: one can take production
 down, and the other means a claimed capability may not exist.
 
-**1. Repoint Railway from `docs/schedule-ident-best` to `main`. Needs Omar.**
+**One of the two is done. The second is still open and still first.**
+
+**1. ~~Repoint Railway from `docs/schedule-ident-best` to `main`.~~ Done
+2026-08-21.**
+
+Production builds and serves `main`, verified from outside with
+`verify-deployment.mjs --expect-commit`: **8/8**, `running 4bc51f9c43e3 on
+main`. `docs/schedule-ident-best` is deleted, and the split where Vercel
+served `main` while Railway served the branch is closed with it.
+
+The part worth carrying forward: **changing Railway's source branch deployed
+nothing.** The settings screen read `main` while `/health` still reported the
+old branch, across two merges and at least five minutes; a manual Deploy moved
+it in about 20 seconds. Confirm the deploy, never the setting — see
+`DEPLOYMENT.md` §2. Whether Automatic Deployments is on for the service is
+still unconfirmed, and if it is off every future merge stops short of
+production without a click.
+
+<details>
+<summary>The original instruction, kept because the ordering argument is
+reusable</summary>
 
 Production's API is built from a feature branch. Merging that branch's PR and
 deleting it — the normal end of every session here — removes the ref Railway
@@ -155,7 +175,10 @@ Repointing before merging would roll production backwards; deleting before
 repointing would leave it with nothing to build. Done when both surfaces
 deploy from `main` and the verifier is green against a `main` build.
 
-**2. Reconcile the backup's zero identity count. Needs Omar.**
+</details>
+
+**2. Reconcile the backup's zero identity count. Needs Omar. Still open, and
+now the only thing between here and Session 24.**
 
 The restore rehearsal recovered zero identities from a database that
 `omartest` had registered against earlier in the same session. Both cannot be
