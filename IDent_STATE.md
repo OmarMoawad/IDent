@@ -44,16 +44,30 @@ live-provider path.
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Phase 2 session 6 (the personal storage node) — or the
-> one external step left on session 5 (below), which needs Omar.** Session
+> **Next action: Phase 2 session 6 (the personal storage node).** Session
 > 6 needs nothing from anyone; the design question it must settle before any
 > code is what happens when the node is offline, because that answer decides
 > whether this is a sync protocol or a cache. Sessions 2, 3 and 4 (Slack,
 > Notion, Drive) each still **need Omar** for an app registration or an
 > OAuth scope.
 >
+> **Session 5 live verification — Operator verified, 2026-08-22.** A test
+> identity was reconnected through Google consent; the granted scopes read
+> `gmail.modify calendar.events`. Through the production executor:
+> `reply.draft` returned `succeeded/ok` and a matching draft was confirmed
+> present via the Gmail API (created, never sent); `message.archive`
+> returned `succeeded/ok` and the target message's labels no longer include
+> `INBOX`, confirmed via the Gmail API (reversible — still in All Mail).
+> **`calendar.event.accept` is not yet live-proven** — the test calendar had
+> no upcoming invitation to accept (`eventsSeen: 0`, `needsReconnect: false`,
+> i.e. the events scope *is* granted); its adapter is unit-tested and the
+> path is wired, so this needs only a real invitation to close. Evidence is
+> intentionally limited to outcome codes and label state — no addresses,
+> bodies or tokens.
+>
 > **Session 5 (assistant write actions) is code-complete, 2026-08-22, and
-> counted — but NOT yet live-verified.** The vertical slice for
+> counted; two of three actions are now also live-verified (above).** The
+> vertical slice for
 > `reply.draft`, `message.archive` and `calendar.event.accept` is built and
 > fully covered by automated tests (CI/repository verified): strict intent
 > parsing bound to the retrieval slice; an immutable, append-only,
