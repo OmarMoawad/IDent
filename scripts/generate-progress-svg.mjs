@@ -21,7 +21,17 @@ const PHASES = [
   // STATE file until 2026-08-21. Session 24 (write-action design review)
   // closed 2026-08-21 and is counted here: it was a design session with a
   // reviewed deliverable and a regression test, not a deferral.
-  { name: "Productivity & Real-Time Comms", status: "current", sessionsDone: 6, sessionsTotal: 12 },
+  //
+  // Session 5 (the write-action vertical slice — reply.draft,
+  // message.archive, calendar.event.accept) is counted 2026-08-22: the
+  // subsystem is implemented and fully covered by automated tests
+  // (strict intents, immutable/append-only store, server proposals, Google
+  // adapters, routes, limits, UI). The one remaining step is external —
+  // real Google consent + live provider verification, which needs Omar's
+  // account — so the *engineering* deliverable is complete and counted,
+  // and the live proof is recorded as open in IDent_STATE.md, the same
+  // distinction session 7 drew in receiptless.
+  { name: "Productivity & Real-Time Comms", status: "current", sessionsDone: 7, sessionsTotal: 12 },
   { name: "Documents, Credentials & Ed. Profile", status: "pending" },
   { name: "Health Profile", status: "pending" },
   { name: "Finance", status: "pending" },
