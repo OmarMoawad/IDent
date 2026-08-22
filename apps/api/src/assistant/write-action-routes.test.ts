@@ -104,9 +104,10 @@ describe("write action routes", () => {
     expect(confirm.statusCode).toBe(200);
     expect(confirm.json().status).toBe("approved");
 
-    // The default executor is the not-configured stub, which exercises the
-    // full claim → execute → record path and lands the action in a terminal
-    // state — proving the route wiring, without needing a live provider.
+    // The production executor runs the full claim → execute → record path.
+    // The action references a source that was never connected, so the token
+    // provider reports it ineligible and the action lands failed — proving
+    // the route wiring end to end without a live Google grant.
     const execute = await app.inject({
       method: "POST",
       url: `/identity/assistant/actions/${action.id}/execute`,
@@ -116,7 +117,9 @@ describe("write action routes", () => {
     expect(execute.statusCode).toBe(200);
     const body = execute.json();
     expect(body.status).toBe("failed");
-    expect(body.outcomeCode).toBe("executor_not_configured");
+    // The source was never connected, so the token provider reports it
+    // ineligible (a safe code) rather than attempting a provider call.
+    expect(body.outcomeCode).toMatch(/^ineligible:/);
   });
 
   it("cancels a pending action", async () => {
