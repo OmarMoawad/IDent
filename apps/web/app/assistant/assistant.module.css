@@ -52,3 +52,6 @@
  * reads as a second promise.
  */
 .caveat { display: block; margin-top: .35rem; font-size: .8rem; opacity: .75; }
+
+/* Session 5: the confirm/run/cancel row on a proposed-action card. */
+.actions { display: flex; gap: .5rem; margin-top: .6rem; flex-wrap: wrap; }

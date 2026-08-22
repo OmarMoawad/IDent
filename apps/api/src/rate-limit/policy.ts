@@ -82,6 +82,19 @@ export const RATE_LIMIT_POLICIES: Record<string, RateLimitPolicy> = {
   "provider-sync": { bucket: "provider-sync", subject: "session", limit: 12, windowSeconds: 5 * MINUTE },
   /** Paid third-party inference. A runaway client here costs real money. */
   "assistant": { bucket: "assistant", subject: "session", limit: 30, windowSeconds: HOUR },
+  // Session 5 write actions. The per-session attempt limit is applied by the
+  // Fastify hook on the confirm/execute routes. The per-identity attempt
+  // limit and the three business-effect ceilings are enforced inside the
+  // action service via countRequest keyed by identity — their `subject`
+  // field is a placeholder, since they never flow through resolveSubject.
+  // The threat model keeps these distinct on purpose: request-abuse limits
+  // (attempts) are not the same control as effect aggregation, and neither
+  // is uniformly "tighter" than the other.
+  "assistant-action-attempt-session": { bucket: "assistant-action-attempt-session", subject: "session", limit: 10, windowSeconds: MINUTE },
+  "assistant-action-attempt-identity": { bucket: "assistant-action-attempt-identity", subject: "session", limit: 30, windowSeconds: HOUR },
+  "assistant-action-draft-effect": { bucket: "assistant-action-draft-effect", subject: "session", limit: 20, windowSeconds: HOUR },
+  "assistant-action-archive-effect": { bucket: "assistant-action-archive-effect", subject: "session", limit: 50, windowSeconds: HOUR },
+  "assistant-action-calendar-effect": { bucket: "assistant-action-calendar-effect", subject: "session", limit: 5, windowSeconds: HOUR },
   /** Catch-alls, so a route added later is never completely unthrottled. */
   "default-write": { bucket: "default-write", subject: "session", limit: 120, windowSeconds: MINUTE },
   "default-read": { bucket: "default-read", subject: "session", limit: 600, windowSeconds: MINUTE },
@@ -115,6 +128,11 @@ const RULES: Rule[] = [
   { method: "POST", url: "/identity/contacts/rebuild", policies: ["provider-sync"] },
   { method: "POST", url: "/identity/assistant/ask", policies: ["assistant"] },
   { method: "POST", url: "/identity/priorities/classify", policies: ["assistant"] },
+  // Per-session attempt limit on the write-action state transitions. The
+  // per-identity limit and effect ceilings are the action service's job.
+  { method: "POST", url: "/identity/assistant/actions/:id/confirm", policies: ["assistant-action-attempt-session"] },
+  { method: "POST", url: "/identity/assistant/actions/:id/execute", policies: ["assistant-action-attempt-session"] },
+  { method: "POST", url: "/identity/assistant/actions/:id/cancel", policies: ["assistant-action-attempt-session"] },
 ];
 
 /**

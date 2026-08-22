@@ -126,6 +126,21 @@ describe("route policy", () => {
     expect(policiesForRoute("GET", "/health")).toEqual([]);
   });
 
+  it("puts the per-session attempt limit on the write-action transitions", () => {
+    for (const url of [
+      "/identity/assistant/actions/:id/confirm",
+      "/identity/assistant/actions/:id/execute",
+      "/identity/assistant/actions/:id/cancel",
+    ]) {
+      expect(policiesForRoute("POST", url).map((p) => p.bucket)).toEqual(["assistant-action-attempt-session"]);
+    }
+    expect(RATE_LIMIT_POLICIES["assistant-action-attempt-session"]).toMatchObject({ limit: 10, windowSeconds: 60 });
+    expect(RATE_LIMIT_POLICIES["assistant-action-attempt-identity"]).toMatchObject({ limit: 30, windowSeconds: 3600 });
+    expect(RATE_LIMIT_POLICIES["assistant-action-draft-effect"]).toMatchObject({ limit: 20, windowSeconds: 3600 });
+    expect(RATE_LIMIT_POLICIES["assistant-action-archive-effect"]).toMatchObject({ limit: 50, windowSeconds: 3600 });
+    expect(RATE_LIMIT_POLICIES["assistant-action-calendar-effect"]).toMatchObject({ limit: 5, windowSeconds: 3600 });
+  });
+
   it("is enforced outside the test environment, and off inside it by default", () => {
     expect(isRateLimitEnforced({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toBe(true);
     expect(isRateLimitEnforced({ NODE_ENV: "development" } as NodeJS.ProcessEnv)).toBe(true);

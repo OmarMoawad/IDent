@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { apiGet, apiPost } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
+import { ActionCard, type PendingAction } from "./ActionCard";
 import styles from "./assistant.module.css";
 
 type EgressTier = "same_process" | "loopback" | "same_machine" | "private_network" | "public_internet" | "unknown";
@@ -35,7 +36,7 @@ type AssistantStatus = {
   leavesMachine: boolean;
 };
 type ContextSent = { messages: number; events: number; contacts: number; reminders: number };
-type AskResult = { answer: string; refused: boolean; contextSent: ContextSent };
+type AskResult = { answer: string; refused: boolean; contextSent: ContextSent; pendingActions?: PendingAction[] };
 
 /** Mirrors the server's rule in egress.ts — `unknown` counts as leaving. */
 function tierLeavesMachine(tier: EgressTier): boolean {
@@ -174,6 +175,16 @@ export function AssistantClient() {
             <p className={styles.meta}>{describeContext(result.contextSent)}</p>
             {result.refused && <p className={styles.meta}>The assistant declined this question.</p>}
           </article>
+        </section>
+      )}
+
+      {result?.pendingActions && result.pendingActions.length > 0 && auth && (
+        <section className={styles.layout} aria-label="Proposed actions">
+          {/* A proposal is never carried out on its own — each needs an
+              explicit confirm, then a separate run. */}
+          {result.pendingActions.map((action) => (
+            <ActionCard key={action.id} action={action} token={auth.sessionToken} />
+          ))}
         </section>
       )}
     </main>
