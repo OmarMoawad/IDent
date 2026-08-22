@@ -8,6 +8,7 @@ import {
   MAX_CONTEXT_MESSAGES,
   MAX_ITEM_CHARS,
 } from "./assistant-config.js";
+import type { RetrievedReference } from "./assistant-intent.js";
 
 /**
  * Builds the bounded context the assistant is allowed to see.
@@ -23,6 +24,14 @@ export type RetrievedContext = {
   text: string;
   /** What was actually sent, so the API can tell the user (and tests can assert). */
   counts: { messages: number; events: number; contacts: number; reminders: number };
+  /**
+   * The opaque handles the model may reference (`message:1`, `event:1`),
+   * each bound to the exact identity-owned record it stands for. This is
+   * the *only* place a model-supplied reference is allowed to resolve
+   * against: a target not in this slice cannot be acted on. The numbering
+   * mirrors the `[message N]` / `[event N]` labels in `text` one-for-one.
+   */
+  refs: RetrievedReference[];
 };
 
 /**
@@ -100,6 +109,23 @@ export async function buildAssistantContext(identityId: string, question: string
   const boundedReminders = reminders.slice(0, MAX_CONTEXT_EVENTS);
   const sections: string[] = [];
 
+  // The reference map the model may target. Built from the very same lists,
+  // in the same order, that produce the `[message N]` / `[event N]` labels
+  // below — so `message:1` always denotes the record printed as
+  // `[message 1]`, and nothing else can be referenced.
+  const refs: RetrievedReference[] = [
+    ...messages.map((message, index): RetrievedReference => ({
+      ref: `message:${index + 1}`,
+      kind: "message",
+      id: message.id,
+    })),
+    ...events.map((event, index): RetrievedReference => ({
+      ref: `event:${index + 1}`,
+      kind: "event",
+      id: event.id,
+    })),
+  ];
+
   if (messages.length > 0) {
     sections.push(
       "MESSAGES:\n" +
@@ -167,5 +193,6 @@ export async function buildAssistantContext(identityId: string, question: string
       contacts: contacts.length,
       reminders: boundedReminders.length,
     },
+    refs,
   };
 }

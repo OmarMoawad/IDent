@@ -17,6 +17,10 @@ export class FakeAssistantClient implements AssistantClient {
       text: this.answer.text ?? "A fake answer.",
       refused: this.answer.refused ?? false,
       usage: this.answer.usage ?? { inputTokens: 10, outputTokens: 5 },
+      // Lets a test stand in for a model that proposed a write intent, so
+      // the proposal/confirmation path can be exercised without the live
+      // provider — while the real clients stay answer-only.
+      actionIntents: this.answer.actionIntents ?? [],
     };
   }
 

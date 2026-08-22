@@ -4,7 +4,7 @@ import { buildApp } from "../app.js";
 import type { FastifyInstance } from "fastify";
 import { insertConnectedSource, upsertMessage } from "../comms/store.js";
 import { askAssistant } from "./assistant-service.js";
-import { extractSearchTerms } from "./assistant-retrieval.js";
+import { buildAssistantContext, extractSearchTerms } from "./assistant-retrieval.js";
 import { FakeAssistantClient } from "./test-support/fake-assistant-client.js";
 import { MAX_CONTEXT_MESSAGES } from "./assistant-config.js";
 
@@ -46,6 +46,16 @@ describe("extractSearchTerms", () => {
 });
 
 describe("askAssistant", () => {
+  it("returns opaque references only for records in the retrieved slice", async () => {
+    const app = buildApp();
+    const identity = await identityWithMessages(app, [{ subject: "Invoice", body: "total 12" }]);
+
+    const context = await buildAssistantContext(identity.identityId, "invoice total");
+
+    expect(context.refs[0]).toMatchObject({ ref: "message:1", kind: "message" });
+    await app.close();
+  });
+
   it("sends only the relevant messages, not the whole mailbox", async () => {
     const app = buildApp();
     const identity = await identityWithMessages(app, [
