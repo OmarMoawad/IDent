@@ -11,35 +11,58 @@ export const GOOGLE_OAUTH_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET
 export const GOOGLE_OAUTH_REDIRECT_URI =
   process.env.GOOGLE_OAUTH_REDIRECT_URI ?? "http://localhost:4000/identity/connections/gmail/callback";
 
-// Read-only, nothing more — IDent_STATE.md's session-2 pre-connector
-// checklist calls for the minimum scope the sync actually needs, not a
-// broad grant "in case it's useful later."
-export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+// Session 5 raised these from read-only to the narrowest *write* scopes the
+// approved actions need — and no wider. `gmail.modify` covers creating a
+// draft and removing the INBOX label (archiving); it does **not** grant
+// send. `calendar.events` covers patching an attendee's RSVP. Neither
+// `gmail.send` nor `gmail.compose` is requested, so a sent mail remains
+// impossible at the grant level, not merely by convention.
+export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+export const GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
+export const CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+export const CALENDAR_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
-// Session 17b: Google Calendar, requested on the *same* Google connection
-// rather than as a second provider — decided when this session started, as
-// the cadence entry asked. One consent screen, one token to refresh, one
-// disconnect that revokes both; a second connection to the same account
-// would double all three for no user-visible benefit.
-//
-// The cost of that choice, stated plainly: adding a scope invalidates
-// existing grants, so a source connected before this session has Gmail
-// access only and must be reconnected to gain calendar access. That is why
-// the granted scope is checked at read time (see hasCalendarScope) instead
-// of being assumed from the connection existing.
-export const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
-
-/** Everything the connect flow asks for, space-separated as Google expects. */
-export const GOOGLE_OAUTH_SCOPES = [GMAIL_SCOPE, GOOGLE_CALENDAR_SCOPE].join(" ");
+// The scopes the connect flow now requests. `modify`/`events` each include
+// read, so retrieval keeps working under the new grant.
+export const GMAIL_SCOPE = GMAIL_MODIFY_SCOPE;
+export const GOOGLE_CALENDAR_SCOPE = CALENDAR_EVENTS_SCOPE;
 
 /**
- * Whether a stored grant actually includes calendar access. Google returns
- * the granted scopes on the token response, and a user can decline
- * individual scopes on the consent screen, so this must be checked rather
- * than inferred.
+ * The cost of raising the scope, stated plainly: adding or widening a scope
+ * invalidates existing grants, so a source connected before this session has
+ * only its old read-only access and must be reconnected to gain write
+ * access. Read-only assistant use keeps working meanwhile — the eligibility
+ * checks below accept either the read or the write scope for *reading*, and
+ * require the write scope only for *acting*.
+ */
+export const GOOGLE_OAUTH_SCOPES = [GMAIL_SCOPE, GOOGLE_CALENDAR_SCOPE].join(" ");
+
+/** Everything the connect flow asks for, as an array — handy for assertions. */
+export function requestedScopes(): string[] {
+  return GOOGLE_OAUTH_SCOPES.split(/\s+/).filter(Boolean);
+}
+
+function grantedScopes(grantedScope: string | null | undefined): string[] {
+  return (grantedScope ?? "").split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Whether a stored grant can *read* calendar — either the old read-only
+ * scope or the new events scope, so an unreconnected source still syncs.
  */
 export function hasCalendarScope(grantedScope: string | null | undefined): boolean {
-  return (grantedScope ?? "").split(/\s+/).includes(GOOGLE_CALENDAR_SCOPE);
+  const scopes = grantedScopes(grantedScope);
+  return scopes.includes(CALENDAR_EVENTS_SCOPE) || scopes.includes(CALENDAR_READONLY_SCOPE);
+}
+
+/** Whether a stored grant can create/modify Gmail drafts and labels. */
+export function hasGmailWriteScope(grantedScope: string | null | undefined): boolean {
+  return grantedScopes(grantedScope).includes(GMAIL_MODIFY_SCOPE);
+}
+
+/** Whether a stored grant can modify a calendar event's attendee response. */
+export function hasCalendarWriteScope(grantedScope: string | null | undefined): boolean {
+  return grantedScopes(grantedScope).includes(CALENDAR_EVENTS_SCOPE);
 }
 
 // How many events one on-demand calendar sync pulls, same bounded

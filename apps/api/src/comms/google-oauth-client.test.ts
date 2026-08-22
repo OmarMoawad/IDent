@@ -14,22 +14,22 @@ describe("RealGoogleOAuthClient.getAuthorizationUrl", () => {
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 
-  it("includes the state, minimum read-only scopes, and offline+consent for a refresh token", () => {
+  it("includes the state, the narrowest write scopes, and offline+consent for a refresh token", () => {
     const client = new RealGoogleOAuthClient();
     const url = new URL(client.getAuthorizationUrl("some-state", "some-challenge"));
 
     expect(url.searchParams.get("state")).toBe("some-state");
-    // Session 17b added calendar as a second scope on the same Google
-    // connection. Asserted as an exact set, not a substring: the point of
-    // this test is that the grant stays minimal, so a scope creeping in
-    // must fail here rather than pass a loose check.
+    // Session 5 raised these from read-only to the narrowest write scopes the
+    // approved actions need. Asserted as an exact set, not a substring: the
+    // point of this test is that the grant stays minimal, so a scope creeping
+    // in must fail here rather than pass a loose check.
     expect(url.searchParams.get("scope")?.split(" ").sort()).toEqual([
-      "https://www.googleapis.com/auth/calendar.readonly",
-      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/gmail.modify",
     ]);
-    // Both are read-only — the connector must never be able to send,
-    // modify, or delete anything.
-    expect(url.searchParams.get("scope")).not.toMatch(/\.(send|modify|compose)\b/);
+    // `modify` archives and drafts; it must never be able to *send* or
+    // *compose-and-send*, and the connector must never delete.
+    expect(url.searchParams.get("scope")).not.toMatch(/\.(send|compose)\b/);
     expect(url.searchParams.get("access_type")).toBe("offline");
     expect(url.searchParams.get("prompt")).toBe("consent");
   });
