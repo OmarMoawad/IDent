@@ -58,16 +58,14 @@ live-provider path.
 > present via the Gmail API (created, never sent); `message.archive`
 > returned `succeeded/ok` and the target message's labels no longer include
 > `INBOX`, confirmed via the Gmail API (reversible — still in All Mail).
-> **`calendar.event.accept` is not yet live-proven** — the test calendar had
-> no upcoming invitation to accept (`eventsSeen: 0`, `needsReconnect: false`,
-> i.e. the events scope *is* granted); its adapter is unit-tested and the
-> path is wired, so this needs only a real invitation to close. Evidence is
-> intentionally limited to outcome codes and label state — no addresses,
-> bodies or tokens.
+> `calendar.event.accept` returned `succeeded/ok` on a real guest
+> invitation whose attendee response went from `needsAction` to `accepted`,
+> confirmed via the Calendar API. **All three v1 actions are live-proven.**
+> Evidence is intentionally limited to outcome codes and attendee/label
+> state — no addresses, bodies or tokens.
 >
-> **Session 5 (assistant write actions) is code-complete, 2026-08-22, and
-> counted; two of three actions are now also live-verified (above).** The
-> vertical slice for
+> **Session 5 (assistant write actions) is code-complete and fully
+> live-verified, 2026-08-22.** The vertical slice for
 > `reply.draft`, `message.archive` and `calendar.event.accept` is built and
 > fully covered by automated tests (CI/repository verified): strict intent
 > parsing bound to the retrieval slice; an immutable, append-only,
