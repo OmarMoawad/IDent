@@ -4,6 +4,7 @@ import type { HealthStatus } from "@ident/shared";
 import { registerGmailRoutes } from "./comms/gmail-routes.js";
 import { registerAssistantRoutes } from "./assistant/assistant-routes.js";
 import { registerWriteActionRoutes } from "./assistant/write-action-routes.js";
+import { buildProductionExecutor } from "./assistant/write-actions/executor-factory.js";
 import { registerImportanceRoutes } from "./assistant/importance-routes.js";
 import { registerCalendarRoutes } from "./comms/calendar-routes.js";
 import { registerNotificationRoutes } from "./notifications/notification-routes.js";
@@ -162,7 +163,7 @@ export function buildApp(
   registerContactRoutes(app);
   registerCalendarRoutes(app);
   registerAssistantRoutes(app);
-  registerWriteActionRoutes(app);
+  registerWriteActionRoutes(app, buildProductionExecutor());
   registerImportanceRoutes(app);
   registerNotificationRoutes(app);
 
