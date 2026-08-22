@@ -41,6 +41,7 @@ export class AnthropicAssistantClient implements AssistantClient {
         text: "The assistant declined to answer this question.",
         refused: true,
         usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
+        actionIntents: [],
       };
     }
 
@@ -54,6 +55,13 @@ export class AnthropicAssistantClient implements AssistantClient {
       text: text || "The assistant returned no answer.",
       refused: false,
       usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
+      // Answer-only for now: wiring the model's structured tool-use output
+      // into `parseActionIntents` needs a verified structured-output
+      // contract exercised against the live provider (session-5 design), so
+      // it stays empty here rather than parsing prose into an action. The
+      // proposal path is exercised end to end by injecting intents through
+      // a fake client in the tests.
+      actionIntents: [],
     };
   }
 }

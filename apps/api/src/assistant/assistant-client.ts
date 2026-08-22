@@ -1,4 +1,5 @@
 import { resolveAssistantProvider, type AssistantProvider } from "./assistant-config.js";
+import type { ActionIntent } from "./assistant-intent.js";
 
 /**
  * The provider boundary. Everything above this line — retrieval, the
@@ -10,6 +11,15 @@ export type AssistantAnswer = {
   /** True when the model declined rather than answered. */
   refused: boolean;
   usage: { inputTokens: number; outputTokens: number };
+  /**
+   * Constrained write intents the model proposed, already strictly parsed.
+   * Empty for every answer-only response — and always empty for a provider
+   * without a *verified* structured-output contract, because prose is never
+   * parsed into an action (see the session-5 design). A non-empty value is
+   * only ever a proposal; it authorises nothing until the server resolves,
+   * previews and a human confirms it.
+   */
+  actionIntents: ActionIntent[];
 };
 
 export interface AssistantClient {

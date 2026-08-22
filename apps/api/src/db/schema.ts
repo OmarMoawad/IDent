@@ -643,3 +643,142 @@ export const rateLimitCounters = pgTable(
     index("rate_limit_counters_window_start_idx").on(table.windowStart),
   ],
 );
+
+/**
+ * Phase 2 session 5 — assistant write actions.
+ *
+ * A model may *propose* a constrained action, but only server code
+ * constructs, approves and executes it. These four tables are the durable
+ * spine of that guarantee. The payload, its digest, the identity, the
+ * retrieval slice, the operation key and the approval rows are immutable
+ * once written — enforced by database triggers in the migration, not by
+ * application discipline alone — so what a human confirmed cannot be
+ * altered before it executes, and the audit trail cannot be rewritten.
+ */
+export const assistantPendingActions = pgTable(
+  "assistant_pending_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    /** The session that asked for the action; a different session may confirm it. */
+    requestingSessionId: uuid("requesting_session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    actionType: text("action_type").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    /** Canonical JSON bytes — the exact string the digest is computed over. */
+    canonicalPayload: text("canonical_payload").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    /** The retrieval slice the target references were resolved against (JSON). */
+    retrievalSlice: text("retrieval_slice").notNull(),
+    /** Provider/local preconditions snapshotted at proposal time (JSON). */
+    preconditions: text("preconditions").notNull(),
+    /** pending | approved | executing | succeeded | failed | outcome_unknown | expired | cancelled */
+    status: text("status").notNull().default("pending"),
+    /** Makes execution single-shot: one key, one atomic claim. */
+    operationKey: text("operation_key").notNull(),
+    /** A safe outcome category once executed; never a raw provider response. */
+    outcomeCode: text("outcome_code"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("assistant_pending_actions_operation_key_key").on(table.operationKey),
+    index("assistant_pending_actions_identity_idx").on(table.identityId),
+    index("assistant_pending_actions_status_expiry_idx").on(table.status, table.expiresAt),
+  ],
+);
+
+/**
+ * An immutable approval record. One per confirmation, naming the action, the
+ * identity, the confirming session and the digest that was on screen. Never
+ * updated or deleted — the migration's triggers reject both.
+ */
+export const assistantActionApprovals = pgTable(
+  "assistant_action_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actionId: uuid("action_id")
+      .notNull()
+      .references(() => assistantPendingActions.id, { onDelete: "cascade" }),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    confirmingSessionId: uuid("confirming_session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    payloadDigest: text("payload_digest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // One approval per action: a second confirmation cannot create a rival record.
+    unique("assistant_action_approvals_action_key").on(table.actionId),
+    index("assistant_action_approvals_identity_idx").on(table.identityId),
+  ],
+);
+
+/**
+ * Append-only audit events with a per-action hash chain. Each event's hash
+ * covers the previous event's hash, so removing or altering any event breaks
+ * the chain and `auditChainIsValid` returns false. Holds stable references
+ * and safe outcome codes only — never tokens, raw provider responses, or
+ * message bodies beyond the canonical payload the action already carries.
+ */
+export const assistantActionAuditEvents = pgTable(
+  "assistant_action_audit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actionId: uuid("action_id")
+      .notNull()
+      .references(() => assistantPendingActions.id, { onDelete: "cascade" }),
+    /** Position in this action's chain, from 1. Unique per action. */
+    seq: integer("seq").notNull(),
+    eventType: text("event_type").notNull(),
+    /** Safe, non-sensitive detail (JSON) — a status code, never a body. */
+    detail: text("detail").notNull().default("{}"),
+    /** The prior event's hash, or null for the first event in the chain. */
+    prevHash: text("prev_hash"),
+    hash: text("hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("assistant_action_audit_events_seq_key").on(table.actionId, table.seq),
+    index("assistant_action_audit_events_action_idx").on(table.actionId),
+  ],
+);
+
+/**
+ * A single-use step-up (elevation) event and its consumption.
+ *
+ * No v1 action requires step-up, but this closes Session 24 finding F1: it
+ * gives policy a *single-use* elevation to consume per action, rather than
+ * leaning on the reusable session-wide five-minute window as if it were
+ * one-shot. `consumedByActionId` is set exactly once; its uniqueness makes
+ * a second consumption impossible.
+ */
+export const assistantElevationEvents = pgTable(
+  "assistant_elevation_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identityId: uuid("identity_id")
+      .notNull()
+      .references(() => identities.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    consumedByActionId: uuid("consumed_by_action_id").references(() => assistantPendingActions.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    // An elevation is consumed by at most one action.
+    unique("assistant_elevation_events_consumed_by_key").on(table.consumedByActionId),
+    index("assistant_elevation_events_identity_idx").on(table.identityId),
+  ],
+);

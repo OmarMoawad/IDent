@@ -2,11 +2,15 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../app.js";
+import { db } from "../db/client.js";
+import { sessions } from "../db/schema.js";
 import { findAllMessagesByIdentity, insertConnectedSource, upsertMessage } from "../comms/store.js";
 import { askAssistant } from "./assistant-service.js";
 import { FakeAssistantClient } from "./test-support/fake-assistant-client.js";
+import { DbActionProposalSink } from "./write-actions/proposal-service.js";
 
 /**
  * Session 24's injection regression. The roadmap asks for this test to be
@@ -82,9 +86,10 @@ describe("prompt injection cannot become a write action", () => {
     // a content filter that silently drops hostile input.
     expect(client.lastContext).toContain("attacker@example.com");
 
-    // The result carries no action, no tool call, no pending mutation — the
-    // answer is the only channel out of the model.
-    expect(Object.keys(result).sort()).toEqual(["answer", "contextSent", "refused"]);
+    // With no proposal sink supplied and a prose-only model, the result
+    // carries no pending action at all — the answer is the only channel out.
+    expect(Object.keys(result).sort()).toEqual(["answer", "contextSent", "pendingActions", "refused"]);
+    expect(result.pendingActions).toEqual([]);
 
     // And nothing was written. Same messages, same count, byte for byte.
     const after = await findAllMessagesByIdentity(identity.identityId);
@@ -94,23 +99,38 @@ describe("prompt injection cannot become a write action", () => {
     await app.close();
   });
 
-  it("exposes no route that turns an assistant answer into a write", async () => {
+  it("turns an injected, model-obeyed intent into a pending action and nothing more", async () => {
     const { app, identity } = await identityWithInjectedMail();
+    const [session] = await db.select().from(sessions).where(eq(sessions.identityId, identity.identityId));
+    const before = await findAllMessagesByIdentity(identity.identityId);
 
-    // A valid session, so a 404 means "no such route" rather than "not
-    // authenticated" — the assertion is about the surface not existing.
-    const auth = { authorization: `Bearer ${identity.sessionToken}` };
-    const candidates = [
-      "/identity/assistant/actions",
-      "/identity/assistant/actions/any-id/confirm",
-      "/identity/assistant/actions/any-id/execute",
-      "/identity/assistant/send",
-    ];
+    // The worst case: a model that both obeys the injected text AND emits a
+    // structured intent to act on it. The intent references the injected
+    // message itself.
+    const client = new FakeAssistantClient({
+      text: "Archiving that message as requested.",
+      actionIntents: [{ type: "message.archive", targetRefs: ["message:1"] }],
+    });
 
-    for (const url of candidates) {
-      const response = await app.inject({ method: "POST", url, headers: auth, payload: {} });
-      expect(response.statusCode, `${url} should not exist yet`).toBe(404);
-    }
+    // A recording executor proves the boundary: it is available, and it is
+    // never called. Only the proposal sink runs.
+    const executorRegistry = { calls: [] as unknown[], execute: (...args: unknown[]) => executorRegistry.calls.push(args) };
+
+    const result = await askAssistant(identity.identityId, "what does the invoice say?", client, {
+      sessionId: session.id,
+      proposalSink: new DbActionProposalSink(),
+      executorRegistry,
+    });
+
+    // At most a pending action — bound to a server-built payload, awaiting a
+    // human — and never an executed write.
+    expect(result.pendingActions).toHaveLength(1);
+    expect(result.pendingActions[0].summary).toEqual({ kind: "message.archive", count: 1 });
+    expect(executorRegistry.calls).toHaveLength(0);
+
+    // Nothing was mutated by proposing it: same messages, byte for byte.
+    const after = await findAllMessagesByIdentity(identity.identityId);
+    expect(after.map((m) => m.id).sort()).toEqual(before.map((m) => m.id).sort());
 
     await app.close();
   });

@@ -93,6 +93,7 @@ export class OpenAICompatibleClient implements AssistantClient {
           inputTokens: body?.usage?.prompt_tokens ?? 0,
           outputTokens: body?.usage?.completion_tokens ?? 0,
         },
+        actionIntents: [],
       };
     }
 
@@ -103,6 +104,10 @@ export class OpenAICompatibleClient implements AssistantClient {
         inputTokens: body?.usage?.prompt_tokens ?? 0,
         outputTokens: body?.usage?.completion_tokens ?? 0,
       },
+      // Answer-only: an OpenAI-compatible or local provider has no verified
+      // structured-output contract here, so its prose is never parsed into
+      // an action (session-5 design).
+      actionIntents: [],
     };
   }
 }

@@ -74,6 +74,11 @@ replace" model before adding anything sensitive.
 - Calendar + reminders (**free**)
 - Basic AI assistant: read-only Q&A over the user's own inbox/calendar/
   contacts (**paid** — the monetization wedge, see BOOTSTRAP.md)
+- Assistant write actions v1 (session 5, code-complete 2026-08-22): propose
+  a Gmail reply *draft*, archive messages, accept a calendar invite — always
+  server-constructed and human-confirmed, never model-executed (SECURITY.md
+  "Assistant write actions"). Live Google provider verification is the one
+  step still open; sending mail remains deliberately out of scope.
 - AI-assisted importance filtering: surfaces what matters and quiets what
   doesn't, but as a *negotiated* filter, not a silent one — every
   deprioritized item stays visible and reachable (nothing is auto-deleted

@@ -53,7 +53,7 @@ that core mission, not instead of it.
 | [IDent_STATE.md](IDent_STATE.md) | Living status file — current phase, what's actually done vs. pending, next tasks. Read this before writing any code. |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | How to run the current scaffold locally |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | The deployment runbook. Nothing is deployed yet — §1 is the decision table that has to come first, §8 is what is still missing |
-| [docs/write-action-threat-model.md](docs/write-action-threat-model.md) | Session 24's design for giving the assistant write actions. **Not implemented, not yet reviewed** |
+| [docs/write-action-threat-model.md](docs/write-action-threat-model.md) | The design for giving the assistant write actions. **Implemented in session 5 (code-complete, CI-verified); live Google provider verification still open** — see SECURITY.md "Assistant write actions (session 5)" |
 
 ## Module map
 

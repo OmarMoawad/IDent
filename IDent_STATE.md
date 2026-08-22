@@ -44,18 +44,46 @@ live-provider path.
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Phase 2 session 5 or 6.** Session 5 (assistant write
-> actions) is now unblocked: it is design-reviewed, its action set is
-> agreed, and v1 needs nothing from anyone — no v1 action requires the
-> Google send scope, which is exactly why sending was left out. Session 6
-> (the personal storage node) also needs nothing from anyone. Sessions 2,
-> 3 and 4 (Slack, Notion, Drive) each still **need Omar** for an app
-> registration or an OAuth scope. If taking session 5, build F1 and F3
-> first — F3 is load-bearing for v1, and F1 gates any later promotion out
-> of v1. The
-> design question session 6 must settle before any code is what happens
-> when the node is offline, because that answer decides whether this is a
-> sync protocol or a cache.
+> **Next action: Phase 2 session 6 (the personal storage node) — or the
+> one external step left on session 5 (below), which needs Omar.** Session
+> 6 needs nothing from anyone; the design question it must settle before any
+> code is what happens when the node is offline, because that answer decides
+> whether this is a sync protocol or a cache. Sessions 2, 3 and 4 (Slack,
+> Notion, Drive) each still **need Omar** for an app registration or an
+> OAuth scope.
+>
+> **Session 5 (assistant write actions) is code-complete, 2026-08-22, and
+> counted — but NOT yet live-verified.** The vertical slice for
+> `reply.draft`, `message.archive` and `calendar.event.accept` is built and
+> fully covered by automated tests (CI/repository verified): strict intent
+> parsing bound to the retrieval slice; an immutable, append-only,
+> hash-chained action store enforced by database triggers; server-owned
+> proposals with an import-boundary + injection proof that a model reaches
+> at most a pending action; narrow Gmail/Calendar write adapters with
+> idempotent outcome recovery; confirm/execute/cancel routes with
+> per-session + per-identity attempt limits and three business-effect
+> ceilings; and the confirmation UI. Findings F1 (per-action single-use
+> elevation, not the reusable session window) and F3 (the capability
+> boundary is the security proof, the static scan a tripwire) are addressed;
+> the product wording says the slice is "ready to start", not "unblocked
+> entirely".
+>
+> **What still needs Omar (the one open step, and why the session is
+> counted anyway):** OAuth now requests `gmail.modify` + `calendar.events`
+> instead of the read-only scopes, so **the test identity must be
+> reconnected through Google's consent screen**, and then each mutation
+> proven once against a real account — create one draft, archive one
+> message, accept one invite. Until that runs, execution is wired to a
+> **not-configured executor stub** that returns a safe failure rather than
+> pretending to act (`registerWriteActionRoutes` default), and the
+> connection-service-backed write-token provider is the piece to wire when
+> the grant exists. The engineering deliverable is complete and in the tree;
+> the live proof is the external step — the same code-complete-vs-verified
+> distinction receiptless session 7 drew for its FX provider.
+>
+> **Also not verified in this session:** the reconnect-and-mutate
+> browser click-through above. No committed evidence contains addresses,
+> bodies or tokens — only timestamps and safe outcome codes.
 >
 > **Session 24 is done, 2026-08-21 — the write-action design is reviewed,
 > and the injection regression exists ahead of the write path.**

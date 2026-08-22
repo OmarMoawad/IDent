@@ -5,6 +5,7 @@ import { resolveAssistantProvider } from "./assistant-config.js";
 import { classifyUrl, dnsRebindingCaveat } from "./egress.js";
 import { askAssistant, QuestionTooLongError } from "./assistant-service.js";
 import { AssistantUnavailableError, createConfiguredAssistantClient, type AssistantClient } from "./assistant-client.js";
+import { DbActionProposalSink } from "./write-actions/proposal-service.js";
 
 async function authenticatedIdentity(request: FastifyRequest) {
   const token = extractBearerToken(request.headers.authorization);
@@ -71,7 +72,14 @@ export function registerAssistantRoutes(
     const question = typeof request.body?.question === "string" ? request.body.question : "";
 
     try {
-      const result = await askAssistant(identity.identityId, question, await clientFactory());
+      // A structured intent (once a provider has a verified structured
+      // contract) becomes a server-built pending action here; today's
+      // answer-only clients return none, so this changes nothing yet but
+      // completes the path. The executor is deliberately never passed in.
+      const result = await askAssistant(identity.identityId, question, await clientFactory(), {
+        sessionId: identity.sessionId,
+        proposalSink: new DbActionProposalSink(),
+      });
       return result;
     } catch (error) {
       if (error instanceof QuestionTooLongError) return reply.code(400).send({ error: error.message });

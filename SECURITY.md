@@ -387,6 +387,52 @@ heuristic rather than a model call, precisely so the reason is real. A
 user's stated preference (a per-contact or per-source rule) overrides the
 guess, and an explicit per-message override survives re-classification.
 
+### Assistant write actions (session 5)
+
+The assistant can now propose three write actions — a Gmail reply *draft*,
+archiving Gmail messages, and accepting a Google Calendar invitation — under
+a boundary designed so that **model output can never carry out a write**.
+Sending mail, deleting anything, arbitrary recipients, and free-form
+provider tools remain out of scope, at the *grant* level: the OAuth request
+was raised only to `gmail.modify` and `calendar.events`, never `gmail.send`
+or `gmail.compose`.
+
+The security model, stated as properties the tests hold:
+
+- **The model proposes, the server constructs.** Model output may return
+  only a strict, discriminated intent referencing an opaque `message:<n>` /
+  `event:<n>` handle from the exact retrieval slice for that request. Every
+  real field — recipient, provider ids, reply headers, RSVP, operation key —
+  is derived server-side. A handle outside the slice, or any extra field,
+  is rejected. Prose is never parsed into an action.
+- **The boundary is a capability, not a scan.** The assistant's
+  orchestration receives proposal and (separately) execution capabilities as
+  injected interfaces; an import-boundary test forbids model-facing modules
+  from importing an executor or a provider write client, and an injection
+  test proves an injected, model-obeyed intent yields at most a *pending*
+  proposal and zero executor calls. The older static seam scan is kept only
+  as a secondary tripwire.
+- **Confirmation binds bytes.** A pending action carries canonical JSON and
+  its SHA-256 digest; the UI renders the server preview and echoes that
+  digest back on confirm. Confirmation and execution are separate,
+  independently authenticated, identity-scoped transitions; a cross-identity
+  request is a 404, a stale digest a 409.
+- **The record cannot be rewritten.** Payload, digest, identity, slice,
+  operation key and approval rows are immutable, and approval/audit rows are
+  append-only — enforced by database triggers, with a per-action hash chain.
+- **Single-shot and recoverable.** One unique operation key and one atomic
+  execution claim make a replayed execute a no-op; provider adapters fetch
+  state first (already-archived / already-accepted are known idempotent
+  successes) and resolve an ambiguous timeout by lookup, never a blind retry
+  — an unresolved mutation becomes `outcome_unknown`, not a silent retry.
+- **Bounded effects.** Per-identity rolling-hour ceilings (20 drafts, 50
+  archive targets, 5 calendar accepts) plus attempt limits (10/min/session,
+  30/hour/identity) are enforced in the action service and consumed when
+  execution is claimed, so failing calls cannot buy extra provider attempts.
+
+Existing read-only connections keep working but cannot execute actions until
+reconnected with the write grant, and are shown a reconnect prompt.
+
 ## Incident response principle
 
 Because each trust tier has its own key domain, a credible response to "your
