@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "verify:live": "tsx scripts/live-verification.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

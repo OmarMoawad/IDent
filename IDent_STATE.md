@@ -44,12 +44,25 @@ live-provider path.
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action: Phase 2 session 6 (the personal storage node).** Session
-> 6 needs nothing from anyone; the design question it must settle before any
-> code is what happens when the node is offline, because that answer decides
-> whether this is a sync protocol or a cache. Sessions 2, 3 and 4 (Slack,
-> Notion, Drive) each still **need Omar** for an app registration or an
-> OAuth scope.
+> **Next action — do these two BEFORE session 6, in order (set 2026-08-22
+> after the write-action review):**
+>
+> 1. **Close write-action gate 2 — real-model emission + browser UX E2E.**
+>    Define and verify a structured-output contract so the *real* assistant
+>    (not a test fake) can emit a constrained action intent, then run one
+>    real browser → assistant → proposal → ActionCard → confirm → execute →
+>    Google verification. Only then is "the assistant write-action feature is
+>    fully end-to-end live-verified" accurate. Produce a live-verification
+>    artifact for the run (`npm run verify:live -w apps/api`, needs a
+>    reconnected Google source — see `docs/live-verification/`).
+> 2. **Receiptless (other repo) Settings browser click-through** — the one
+>    open Phase 2 acceptance gate there; see that repo's `RECEIPTLESS_STATE.md`.
+>
+> **Then: Phase 2 session 6 (the personal storage node).** Session 6 needs
+> nothing from anyone; the design question it must settle before any code is
+> what happens when the node is offline, because that answer decides whether
+> this is a sync protocol or a cache. Sessions 2, 3 and 4 (Slack, Notion,
+> Drive) each still **need Omar** for an app registration or an OAuth scope.
 >
 > **Session 5 live verification — Operator verified, 2026-08-22.** A test
 > identity was reconnected through Google consent; the granted scopes read
