@@ -1,0 +1,52 @@
+{
+  "artifactVersion": 1,
+  "repo": "IDent",
+  "generatedAt": "2026-08-23T18:26:26.411Z",
+  "commit": "4b96d7699e600e8ff4835a2e1803278a0f8b595b",
+  "identityRef": "a0725c185df41e18",
+  "grantedScopes": [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/gmail.modify"
+  ],
+  "verifications": [
+    {
+      "action": "reply.draft",
+      "status": "verified",
+      "outcomeCode": "ok",
+      "targetRef": "b34e560d50d82f2d",
+      "before": {
+        "draftInThread": false
+      },
+      "after": {
+        "draftCreated": true,
+        "threaded": true,
+        "threadRef": "b34e560d50d82f2d"
+      }
+    },
+    {
+      "action": "message.archive",
+      "status": "verified",
+      "outcomeCode": "ok",
+      "targetRef": "87697f85bde69e11",
+      "before": {
+        "inbox": true
+      },
+      "after": {
+        "inbox": false,
+        "restored": true
+      }
+    },
+    {
+      "action": "calendar.event.accept",
+      "status": "verified",
+      "outcomeCode": "ok",
+      "targetRef": "f425d54964339134",
+      "before": {
+        "selfResponse": "needsAction"
+      },
+      "after": {
+        "selfResponse": "accepted"
+      }
+    }
+  ]
+}
