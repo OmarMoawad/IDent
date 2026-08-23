@@ -21,9 +21,12 @@ import { ActionConflictError, type PendingActionRow } from "./types.js";
  * - **Attempt limits** bound request abuse: a per-session limit (applied by
  *   the Fastify hook on the route) and a per-identity limit (here).
  * - **Effect ceilings** bound real-world consequences per identity per
- *   rolling hour, and are consumed *when execution is claimed* — including
- *   when the provider then fails, so a run of failing calls cannot buy extra
- *   provider attempts.
+ *   rolling hour. They are consumed *immediately after* the single-shot
+ *   execution claim — so a replayed or concurrent execute that loses the
+ *   claim burns no quota, while a claim that wins consumes the ceiling even
+ *   if the provider then fails, so a run of failing calls cannot buy extra
+ *   provider attempts. The claim is the atomic gate; consumption rides on
+ *   winning it rather than preceding it.
  */
 
 export class ActionRateLimitedError extends Error {
@@ -107,15 +110,33 @@ export function createWriteActionService(executor: ActionExecutorRegistry) {
         throw new ActionConflictError("wrong-status", `Cannot execute an action that is ${action.status}`);
       }
 
-      // Consume the effect ceiling *before* claiming, so a provider failure
-      // after the claim still counts against the hourly budget.
-      const { policy, count } = effectPolicyFor(action);
-      for (let i = 0; i < count; i++) await consumeEffect(input.identityId, policy);
-
-      // Single-shot claim: concurrent/replayed executes resolve to one.
+      // Single-shot claim first: a concurrent or replayed execute that loses
+      // this resolves to one winner and — crucially — never reaches the
+      // consume/execute below, so it cannot burn quota on a claim it lost.
       const claimed = await claimExecution(action.id);
-      const result = await executor.execute(claimed);
-      await recordActionOutcome(action.id, result.status, result.code);
+
+      // From here the action is `executing`; every path must land it in a
+      // terminal state, or a failed consume/execute would strand it.
+      try {
+        // Consume the effect ceiling now that the claim is won. Counts
+        // against the hourly budget even if the provider then fails.
+        const { policy, count } = effectPolicyFor(action);
+        for (let i = 0; i < count; i++) await consumeEffect(input.identityId, policy);
+
+        const result = await executor.execute(claimed);
+        await recordActionOutcome(action.id, result.status, result.code);
+      } catch (error) {
+        // A full ceiling stops the run after the claim; record it failed so
+        // the action is terminal rather than stuck `executing`.
+        if (error instanceof ActionRateLimitedError) {
+          await recordActionOutcome(action.id, "failed", "effect_limit").catch(() => {});
+        } else {
+          // An unexpected executor throw: mark the outcome unknown (never
+          // auto-retried) rather than leaving the action mid-flight.
+          await recordActionOutcome(action.id, "outcome_unknown", "executor_error").catch(() => {});
+        }
+        throw error;
+      }
 
       return requireOwned(await getPendingAction(action.id), input.identityId);
     },

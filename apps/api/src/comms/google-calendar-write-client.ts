@@ -9,12 +9,20 @@ import type { WriteOutcome } from "./google-mail-write-client.js";
  *
  * - if that attendee is already `accepted`, reports a known idempotent
  *   success rather than patching again;
- * - otherwise patches only that attendee's `responseStatus`, leaving every
- *   other attendee and every other field untouched.
+ * - if that attendee has explicitly `declined`, it refuses rather than
+ *   silently reversing the decline — un-declining is a deliberate act the
+ *   person should take themselves, not a side effect of an accept;
+ * - from `needsAction` or `tentative` it patches only that attendee's
+ *   `responseStatus`, leaving every other attendee and every other field
+ *   untouched.
  *
- * A timeout is resolved by re-fetching the attendee's response — never by a
- * blind retry. No other attendee's response, and no event content, is ever
- * modified. Tokens and raw responses stay out of logs and outcome codes.
+ * Concurrency: the read captures the event's `etag`, and the patch carries
+ * it as `If-Match`. If another change landed in between, Google returns 412
+ * and the adapter re-reads once and retries against the fresh state rather
+ * than blindly overwriting a stale attendee collection. A timeout is
+ * resolved by re-fetching the attendee's response — never by a blind retry.
+ * No other attendee's response, and no event content, is ever modified.
+ * Tokens and raw responses stay out of logs and outcome codes.
  */
 
 export type AcceptInvitationInput = {
@@ -29,7 +37,10 @@ export interface CalendarWriteClient {
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 type CalendarAttendee = { email?: string; self?: boolean; responseStatus?: string };
-type CalendarEventResource = { attendees?: CalendarAttendee[] };
+type CalendarEventResource = { etag?: string; attendees?: CalendarAttendee[] };
+
+/** Responses we may move to `accepted`. A `declined` self is deliberately excluded. */
+const ACCEPTABLE_FROM = new Set([undefined, "needsAction", "tentative", "accepted"]);
 
 const CALENDAR_BASE = "https://www.googleapis.com/calendar/v3/calendars";
 
@@ -42,7 +53,16 @@ export class RealGoogleCalendarWriteClient implements CalendarWriteClient {
 
   async acceptInvitation(accessToken: string, input: AcceptInvitationInput): Promise<WriteOutcome> {
     const calendarId = input.calendarId ?? "primary";
+    return this.attemptAccept(accessToken, calendarId, input, true);
+  }
 
+  /** Read → decide → conditional patch, retried once on an etag conflict. */
+  private async attemptAccept(
+    accessToken: string,
+    calendarId: string,
+    input: AcceptInvitationInput,
+    retryOnConflict: boolean,
+  ): Promise<WriteOutcome> {
     let event: CalendarEventResource | null;
     try {
       const response = await this.fetchImpl(eventUrl(calendarId, input.providerEventId), {
@@ -61,20 +81,42 @@ export class RealGoogleCalendarWriteClient implements CalendarWriteClient {
     // actionable, and that is a definite failure, not an ambiguity.
     if (!self) return { status: "failed", code: "not_an_attendee" };
     if (self.responseStatus === "accepted") return { status: "succeeded", duplicate: true };
+    // Never silently reverse an explicit decline.
+    if (!ACCEPTABLE_FROM.has(self.responseStatus)) {
+      return { status: "failed", code: "response_not_reversible" };
+    }
 
     // Patch only the self attendee's response; leave everyone else as-is.
+    // The captured etag makes this a compare-and-swap: a concurrent change
+    // makes the patch 412 rather than clobber a now-stale attendee list.
     const patchedAttendees = attendees.map((a) => (a.self ? { ...a, responseStatus: "accepted" } : a));
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+    };
+    if (event?.etag) headers["if-match"] = event.etag;
+
+    let patch: Response;
     try {
-      const patch = await this.fetchImpl(eventUrl(calendarId, input.providerEventId), {
+      patch = await this.fetchImpl(eventUrl(calendarId, input.providerEventId), {
         method: "PATCH",
-        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        headers,
         body: JSON.stringify({ attendees: patchedAttendees }),
       });
-      if (patch.ok) return { status: "succeeded" };
-      return mapHttpFailure(patch.status);
     } catch {
       return this.lookupAcceptanceOutcome(accessToken, input);
     }
+
+    if (patch.ok) return { status: "succeeded" };
+    // Someone else changed the event between our read and write. Re-read the
+    // fresh state and try once more; a second conflict is reported, not
+    // forced.
+    if (patch.status === 412) {
+      return retryOnConflict
+        ? this.attemptAccept(accessToken, calendarId, input, false)
+        : { status: "outcome_unknown", code: "concurrent_modification" };
+    }
+    return mapHttpFailure(patch.status);
   }
 
   async lookupAcceptanceOutcome(accessToken: string, input: AcceptInvitationInput): Promise<WriteOutcome> {

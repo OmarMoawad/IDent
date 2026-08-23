@@ -149,6 +149,17 @@ export class DbActionProposalSink implements ActionProposalSink {
     return { ...preview, summary: { kind: "calendar.event.accept", title: event.title ?? "(untitled)" } };
   }
 
+  /**
+   * Persist the pending action. `preconditions` here is a **proposal-time
+   * snapshot for the audit trail**, not an enforced optimistic precondition:
+   * execution does not diff this snapshot against live state. Eligibility is
+   * instead re-checked at execution time by the adapters against the *then*
+   * current provider state — an already-archived message is an idempotent
+   * success, a vanished attendee is a definite failure — and the only true
+   * compare-and-swap is the calendar adapter's `If-Match` etag. Treat the
+   * three layers as distinct: snapshot (audit), execution-time eligibility
+   * (adapters), and CAS (calendar etag).
+   */
   private async persist(
     input: ProposeInput,
     actionType: WriteActionType,
