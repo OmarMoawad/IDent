@@ -1,10 +1,21 @@
 import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { calendarEvents, connectedSources, messages, sessions } from "../../db/schema.js";
+import { connectedSources, messages, sessions } from "../../db/schema.js";
 import { getActiveAccessToken } from "../../comms/connection-service.js";
 import { syncGmailMessages } from "../../comms/gmail-sync-service.js";
 import { syncCalendarEvents } from "../../comms/calendar-sync-service.js";
+import { upsertCalendarEvent } from "../../comms/calendar-store.js";
+
+type ProviderEvent = {
+  id: string;
+  summary?: string;
+  location?: string;
+  status?: string;
+  start?: { dateTime?: string; date?: string };
+  end?: { dateTime?: string; date?: string };
+  attendees?: { self?: boolean; responseStatus?: string }[];
+};
 import type { RetrievedReference } from "../assistant-intent.js";
 import { DbActionProposalSink } from "./proposal-service.js";
 import { buildProductionExecutor } from "./executor-factory.js";
@@ -150,17 +161,33 @@ export async function generateLiveVerificationArtifact(options: {
   }
 
   // --- calendar.event.accept (only if a pending invite exists) ---
-  const events = await db
-    .select()
-    .from(calendarEvents)
-    .where(eq(calendarEvents.identityId, identityId))
-    .orderBy(desc(calendarEvents.startsAt))
-    .limit(10);
+  // Query the provider directly rather than only the synced slice, so a
+  // pending invite is found even on a busy calendar where the sync window
+  // (or a stale DB) would miss it. Then upsert the found invite so the
+  // proposal can resolve the reference by id.
   let pending: { id: string; externalId: string } | null = null;
-  for (const e of events) {
-    const g = (await (await fetch(`${CAL}/events/${encodeURIComponent(e.externalId)}`, { headers: auth })).json()) as { attendees?: { self?: boolean; responseStatus?: string }[] };
-    const self = (g.attendees ?? []).find((a) => a.self);
-    if (self && self.responseStatus !== "accepted") { pending = { id: e.id, externalId: e.externalId }; break; }
+  const since = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
+  const listUrl = `${CAL}/events?${new URLSearchParams({ timeMin: since, maxResults: "250", singleEvents: "true", orderBy: "startTime" })}`;
+  const list = (await (await fetch(listUrl, { headers: auth })).json()) as { items?: ProviderEvent[] };
+  const invite = (list.items ?? []).find((e) => {
+    const self = (e.attendees ?? []).find((a) => a.self);
+    return self?.responseStatus === "needsAction" || self?.responseStatus === "tentative";
+  });
+  if (invite) {
+    const row = await upsertCalendarEvent({
+      identityId,
+      sourceId: src.id,
+      externalId: invite.id,
+      title: invite.summary ?? null,
+      description: null,
+      location: invite.location ?? null,
+      startsAt: new Date(invite.start?.dateTime ?? invite.start?.date ?? Date.now()),
+      endsAt: invite.end?.dateTime ? new Date(invite.end.dateTime) : null,
+      isAllDay: Boolean(invite.start?.date),
+      attendees: JSON.stringify(invite.attendees ?? []),
+      status: invite.status ?? null,
+    });
+    pending = { id: row.id, externalId: invite.id };
   }
   if (pending) {
     const beforeSelf = await selfResponse(auth, pending.externalId);
