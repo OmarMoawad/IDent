@@ -50,6 +50,55 @@ describe("RealGoogleCalendarWriteClient", () => {
     expect(await client.acceptInvitation("tok", { providerEventId: "e1" })).toEqual({ status: "failed", code: "not_an_attendee" });
   });
 
+  it("refuses to reverse an explicit decline rather than silently accepting", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ attendees: [{ self: true, responseStatus: "declined" }] }), { status: 200 }),
+    );
+    const client = new RealGoogleCalendarWriteClient(fetchImpl);
+    expect(await client.acceptInvitation("tok", { providerEventId: "e1" })).toEqual({
+      status: "failed",
+      code: "response_not_reversible",
+    });
+    // Read only; no patch attempted.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the etag as If-Match and retries once on a 412 conflict", async () => {
+    let patchCalls = 0;
+    const ifMatch: (string | undefined)[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      if (init.method === "GET") {
+        // Fresh etag each read, so the retry carries the newer one.
+        const etag = patchCalls === 0 ? '"v1"' : '"v2"';
+        return new Response(JSON.stringify({ etag, attendees: [{ self: true, responseStatus: "needsAction" }] }), { status: 200 });
+      }
+      // PATCH
+      ifMatch.push(new Headers(init.headers).get("if-match") ?? undefined);
+      patchCalls += 1;
+      return patchCalls === 1 ? new Response("conflict", { status: 412 }) : new Response("{}", { status: 200 });
+    });
+    const client = new RealGoogleCalendarWriteClient(fetchImpl);
+
+    expect(await client.acceptInvitation("tok", { providerEventId: "e1" })).toEqual({ status: "succeeded" });
+    expect(patchCalls).toBe(2);
+    // First patch used the original etag; the retry used the re-read one.
+    expect(ifMatch).toEqual(['"v1"', '"v2"']);
+  });
+
+  it("reports a persistent 412 as an ambiguous concurrent modification, not a blind overwrite", async () => {
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      if (init.method === "GET") {
+        return new Response(JSON.stringify({ etag: '"v"', attendees: [{ self: true, responseStatus: "needsAction" }] }), { status: 200 });
+      }
+      return new Response("conflict", { status: 412 });
+    });
+    const client = new RealGoogleCalendarWriteClient(fetchImpl);
+    expect(await client.acceptInvitation("tok", { providerEventId: "e1" })).toEqual({
+      status: "outcome_unknown",
+      code: "concurrent_modification",
+    });
+  });
+
   it("recovers from a patch timeout by re-reading the attendee response", async () => {
     let call = 0;
     const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {

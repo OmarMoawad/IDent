@@ -60,12 +60,37 @@ live-provider path.
 > `INBOX`, confirmed via the Gmail API (reversible — still in All Mail).
 > `calendar.event.accept` returned `succeeded/ok` on a real guest
 > invitation whose attendee response went from `needsAction` to `accepted`,
-> confirmed via the Calendar API. **All three v1 actions are live-proven.**
-> Evidence is intentionally limited to outcome codes and attendee/label
-> state — no addresses, bodies or tokens.
+> confirmed via the Calendar API. Evidence is intentionally limited to
+> outcome codes and attendee/label state — no addresses, bodies or tokens.
 >
-> **Session 5 (assistant write actions) is code-complete and fully
-> live-verified, 2026-08-22.** The vertical slice for
+> **Two acceptance gates, kept distinct (post-review, 2026-08-22):**
+>
+> 1. **Provider/backend end-to-end — PASSED.** All three v1 provider write
+>    *executors* are live-proven against a real Google account, as above.
+> 2. **Real-model + browser UX end-to-end — NOT YET PROVEN.** The real
+>    Anthropic/OpenAI-compatible clients remain deliberately answer-only
+>    (`actionIntents: []`); only fake/test clients emit structured intents.
+>    So a production assistant *interpreting a request → emitting a
+>    constrained structured intent → rendering the ActionCard → confirming →
+>    executing* has not been demonstrated. That path opens only behind a
+>    verified structured-output contract, and a real browser click-through
+>    of confirm/execute is still to run.
+>
+> So the precise claim is: **all three v1 provider write executors are
+> live-proven; real-model structured action emission and the browser
+> confirmation UX remain to prove.** Not "the assistant feature is fully
+> end-to-end live-verified."
+>
+> Two review fixes folded in the same day: `reply.draft` now builds a
+> **true threaded reply** — it reads the original message's thread id and
+> `Message-ID` and sets `threadId` + `In-Reply-To`/`References`, tested — and
+> `calendar.event.accept` now **refuses to reverse an explicit `declined`**
+> (a deliberate product decision) and uses an **`If-Match` etag CAS** with a
+> single re-read on a 412 conflict. Effect ceilings are consumed **after**
+> the single-shot execution claim, so a lost/replayed claim burns no quota.
+>
+> **Session 5 (assistant write actions) is code-complete; its provider
+> executors are live-verified (gate 1), 2026-08-22.** The vertical slice for
 > `reply.draft`, `message.archive` and `calendar.event.accept` is built and
 > fully covered by automated tests (CI/repository verified): strict intent
 > parsing bound to the retrieval slice; an immutable, append-only,

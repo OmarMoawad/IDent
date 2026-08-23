@@ -65,6 +65,7 @@ export class DefaultActionExecutorRegistry implements ActionExecutorRegistry {
           to: p.to,
           subject: p.subject,
           body: p.body,
+          inReplyToProviderMessageId: p.providerMessageId,
           operationKey: action.operationKey,
         }),
       );

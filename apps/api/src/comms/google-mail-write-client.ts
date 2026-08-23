@@ -26,8 +26,17 @@ export type ReplyDraftInput = {
   to: string;
   subject: string;
   body: string;
-  threadId?: string;
+  /** The Gmail id of the message being replied to — used to thread the draft. */
+  inReplyToProviderMessageId: string;
   operationKey: string;
+};
+
+/** Extra fields, resolved from the original message, that make the draft a real reply. */
+export type ReplyThreading = {
+  /** Gmail thread id, so the draft sits inside the original conversation. */
+  threadId?: string;
+  /** The original message's RFC822 Message-ID, for In-Reply-To/References. */
+  inReplyTo?: string;
 };
 
 export interface MailWriteClient {
@@ -45,25 +54,44 @@ export function draftMessageId(operationKey: string): string {
   return `<action-${operationKey}@ident.local>`;
 }
 
-/** Build the raw RFC 5322 reply, base64url-encoded as Gmail's `raw` field wants. */
-export function buildReplyMime(input: ReplyDraftInput): string {
+/**
+ * Build the raw RFC 5322 reply, base64url-encoded as Gmail's `raw` field
+ * wants. When `threading.inReplyTo` is present it emits `In-Reply-To` and
+ * `References` headers pointing at the original message — which, together
+ * with the `threadId` set on the draft resource and the `Re:` subject, is
+ * what actually makes Gmail file the draft inside the original conversation
+ * rather than as a stray new message.
+ */
+export function buildReplyMime(input: ReplyDraftInput, threading: ReplyThreading = {}): string {
   const headers = [
     `To: ${input.to}`,
     `Subject: ${input.subject}`,
     `Message-ID: ${draftMessageId(input.operationKey)}`,
-    "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
   ];
+  if (threading.inReplyTo) {
+    headers.push(`In-Reply-To: ${threading.inReplyTo}`);
+    headers.push(`References: ${threading.inReplyTo}`);
+  }
+  headers.push("MIME-Version: 1.0", 'Content-Type: text/plain; charset="UTF-8"');
   const raw = `${headers.join("\r\n")}\r\n\r\n${input.body}\r\n`;
   return Buffer.from(raw, "utf8").toString("base64url");
 }
+
+type GmailHeader = { name: string; value: string };
 
 export class RealGoogleMailWriteClient implements MailWriteClient {
   constructor(private readonly fetchImpl: FetchLike = (url, init) => fetch(url, init)) {}
 
   async createReplyDraft(accessToken: string, input: ReplyDraftInput): Promise<WriteOutcome> {
-    const raw = buildReplyMime(input);
-    const body = JSON.stringify({ message: { raw, ...(input.threadId ? { threadId: input.threadId } : {}) } });
+    // Resolve threading from the original message before building the draft:
+    // its Gmail thread id, and its RFC822 Message-ID for In-Reply-To. A
+    // draft is a real reply only if it lands in the original conversation.
+    const threading = await this.resolveThreading(accessToken, input.inReplyToProviderMessageId);
+
+    const raw = buildReplyMime(input, threading);
+    const body = JSON.stringify({
+      message: { raw, ...(threading.threadId ? { threadId: threading.threadId } : {}) },
+    });
 
     let response: Response;
     try {
@@ -84,6 +112,33 @@ export class RealGoogleMailWriteClient implements MailWriteClient {
       return { status: "succeeded", providerId: parsed?.id };
     }
     return mapHttpFailure(response.status);
+  }
+
+  /**
+   * Read the original message's thread id and Message-ID header. Best-effort:
+   * if it can't be fetched, the draft is still created (unthreaded) rather
+   * than the whole action failing over a threading detail.
+   */
+  private async resolveThreading(
+    accessToken: string,
+    providerMessageId: string,
+  ): Promise<ReplyThreading> {
+    try {
+      const response = await this.fetchImpl(
+        `${GMAIL_BASE}/messages/${providerMessageId}?format=metadata&metadataHeaders=Message-ID`,
+        { method: "GET", headers: { authorization: `Bearer ${accessToken}` } },
+      );
+      if (!response.ok) return {};
+      const parsed = (await response.json().catch(() => null)) as
+        | { threadId?: string; payload?: { headers?: GmailHeader[] } }
+        | null;
+      const inReplyTo = parsed?.payload?.headers?.find(
+        (h) => h.name.toLowerCase() === "message-id",
+      )?.value;
+      return { threadId: parsed?.threadId, inReplyTo };
+    } catch {
+      return {};
+    }
   }
 
   async archiveMessage(accessToken: string, providerMessageId: string): Promise<WriteOutcome> {
