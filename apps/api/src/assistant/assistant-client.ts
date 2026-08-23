@@ -13,11 +13,13 @@ export type AssistantAnswer = {
   usage: { inputTokens: number; outputTokens: number };
   /**
    * Constrained write intents the model proposed, already strictly parsed.
-   * Empty for every answer-only response — and always empty for a provider
-   * without a *verified* structured-output contract, because prose is never
-   * parsed into an action (see the session-5 design). A non-empty value is
-   * only ever a proposal; it authorises nothing until the server resolves,
-   * previews and a human confirms it.
+   * Empty for every answer-only response. The Anthropic provider populates
+   * this from the model's tool-use output through the verified
+   * structured-output contract (assistant-tools.ts); a provider without such
+   * a contract (the OpenAI-compatible path) leaves it empty rather than
+   * parsing prose into an action. A non-empty value is only ever a proposal;
+   * it authorises nothing until the server resolves, previews and a human
+   * confirms it.
    */
   actionIntents: ActionIntent[];
 };
