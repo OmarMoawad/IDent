@@ -87,6 +87,31 @@ describe.skipIf(!hasProvider)("assistant against the live provider", () => {
     await app.close();
   }, LIVE_TIMEOUT_MS);
 
+  it("emits a structured action intent through the tool contract when asked to act", async () => {
+    // The live half of write-action gate 2: proves the configured model
+    // actually returns a constrained tool call — not prose — that the
+    // client parses into an ActionIntent. Only meaningful against a
+    // provider whose structured-output contract is wired (Anthropic); a
+    // local/OpenAI-compatible provider is answer-only, so the assertion is
+    // relaxed to "did not error" there rather than failing a valid config.
+    const client = await createConfiguredAssistantClient();
+    const answer = await client!.ask({
+      question: "Please draft a short reply to that message saying I'll be there.",
+      context:
+        "[message 1] From: Sam <sam@example.com>\nSubject: Dinner Friday?\nAre you coming to dinner on Friday?",
+    });
+
+    if (provider?.id === "anthropic") {
+      expect(answer.actionIntents.length).toBeGreaterThan(0);
+      expect(answer.actionIntents[0].type).toBe("reply.draft");
+      console.log(`[live] structured-output contract: model proposed ${answer.actionIntents[0].type}`);
+    } else {
+      // Answer-only provider: the contract is not offered, so no intent is
+      // expected. The value is still that this path ran without throwing.
+      expect(Array.isArray(answer.actionIntents)).toBe(true);
+    }
+  }, LIVE_TIMEOUT_MS);
+
   it("says it cannot find something that is not in the context", async () => {
     // The failure mode that matters: inventing an answer about the user's
     // own data is worse than admitting it isn't there.

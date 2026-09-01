@@ -44,17 +44,36 @@ live-provider path.
 > environment and rejects that key even when set on purpose, which is
 > exactly what review item 3 asked for.
 >
-> **Next action — do these two BEFORE session 6, in order (set 2026-08-22
-> after the write-action review):**
+> **Write-action gate 2, structured-output half — BUILT 2026-08-23.** The
+> *real* Anthropic assistant can now emit a constrained action intent, not
+> just a test fake. The contract is Anthropic **tool-use**:
+> `apps/api/src/assistant/assistant-tools.ts` defines one tool per
+> `ActionIntent` variant (`reply_draft`, `message_archive`,
+> `calendar_event_accept`), each `input_schema` the narrow doorway from
+> `assistant-intent.ts` as JSON Schema with `additionalProperties: false`.
+> `claude-client.ts` now offers those tools, appends a read-only-preserving
+> proposal guidance to the system prompt, and runs every returned `tool_use`
+> block through the same strict `parseActionIntents` gate — so a field
+> smuggled into a tool input (an injected `to`/`providerId`) is still
+> rejected, and prose is still never parsed into an action. A `create` seam
+> lets `claude-client.test.ts` drive the *real* client with canned Anthropic
+> responses (genuine `tool_use` blocks) and prove intents are parsed —
+> closing the "only a fake ever produced intents" gap offline. 15 new tests;
+> API suite 400/400 (one rate-limit flake, green in isolation — see
+> [[known-test-flakes]]), web 37/37, typecheck clean.
 >
-> 1. **Close write-action gate 2 — real-model emission + browser UX E2E.**
->    Define and verify a structured-output contract so the *real* assistant
->    (not a test fake) can emit a constrained action intent, then run one
->    real browser → assistant → proposal → ActionCard → confirm → execute →
->    Google verification. Only then is "the assistant write-action feature is
->    fully end-to-end live-verified" accurate. Produce a live-verification
->    artifact for the run (`npm run verify:live -w apps/api`, needs a
->    reconnected Google source — see `docs/live-verification/`).
+> **Next action — the remaining, Omar-gated half of gate 2, BEFORE session 6:**
+>
+> 1. **Live-verify the structured-output contract + browser UX E2E.** The
+>    offline contract is done; what still needs Omar is the live round-trip:
+>    with `ANTHROPIC_API_KEY` set, the new `assistant-live.test.ts` case
+>    ("emits a structured action intent through the tool contract") asserts
+>    the hosted model actually returns the tool call. Then run one real
+>    browser → assistant → proposal → ActionCard → confirm → execute →
+>    Google verification and produce the artifact (`npm run verify:live -w
+>    apps/api`, needs a reconnected Google source — see
+>    `docs/live-verification/`). Only after that is "fully end-to-end
+>    live-verified" accurate.
 > 2. **Receiptless (other repo) Settings browser click-through** — the one
 >    open Phase 2 acceptance gate there; see that repo's `RECEIPTLESS_STATE.md`.
 >
